@@ -1,8 +1,9 @@
 import React from 'react';
-import { MainAppContainer } from './components/DeviceFrame';
+import { MerchantPosContainer } from './components/MerchantPosContainer';
 
 export const App: React.FC = () => {
-  return <MainAppContainer />;
+  return <MerchantPosContainer />;
 };
 
 export default App;
+
