@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
 import { PosKeypad } from './PosKeypad';
 import { PaymentMethodSelector } from './PaymentMethodSelector';
-import { PinEntryModal } from './PinEntryModal';
-import { posDb } from '../../db/db';
-import { validateTransactionRules } from '../../utils/rulesEngine';
+import { PaymentWorkflowModal } from './PaymentWorkflowModal';
 import type { PaymentMethodType, PosTransactionRecord } from '../../types/pos';
-import { ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, RefreshCw, XCircle } from 'lucide-react';
+import { ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, XCircle } from 'lucide-react';
 
 interface PosTerminalViewProps {
   isOnline?: boolean;
   terminalId?: string;
   merchantId?: string;
+  merchantName?: string;
   onTransactionPersisted?: (txn: PosTransactionRecord) => void;
 }
 
@@ -18,12 +17,12 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
   isOnline = true,
   terminalId = 'TERM-MUM-001',
   merchantId = 'MERCHANT-MUM-01',
+  merchantName = 'Metro Specialty Coffee Roasters',
   onTransactionPersisted
 }) => {
   const [amountStr, setAmountStr] = useState<string>('0');
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>('CARD_NFC');
-  const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState<boolean>(false);
   const [lastTxn, setLastTxn] = useState<PosTransactionRecord | null>(null);
 
   const numericAmount = parseFloat(amountStr) || 0;
@@ -69,68 +68,15 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
   // Charge / Checkout Trigger
   const handleInitiatePayment = () => {
     if (numericAmount <= 0) return;
+    setIsWorkflowModalOpen(true);
+  };
 
-    if (selectedMethod === 'CARD_CHIP') {
-      setIsPinModalOpen(true);
-    } else {
-      processTransaction();
+  const handlePaymentSuccess = (newRecord: PosTransactionRecord) => {
+    setLastTxn(newRecord);
+    setAmountStr('0');
+    if (onTransactionPersisted) {
+      onTransactionPersisted(newRecord);
     }
-  };
-
-  const handlePinSubmit = (_pin: string) => {
-    setIsPinModalOpen(false);
-    processTransaction();
-  };
-
-  const processTransaction = async () => {
-    setIsProcessing(true);
-
-    setTimeout(async () => {
-      try {
-        const validation = await validateTransactionRules({
-          amount: numericAmount,
-          paymentMethod: selectedMethod,
-          isOnline
-        });
-
-        const now = new Date().toISOString();
-        const clientUuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `uuid-${Date.now()}`;
-        const txnId = `TXN-${Math.floor(10000 + Math.random() * 90000)}`;
-
-        const newRecord: PosTransactionRecord = {
-          id: txnId,
-          clientUuid,
-          terminalId,
-          merchantId,
-          amount: numericAmount,
-          currency: 'INR',
-          paymentMethod: selectedMethod,
-          cardNetwork: selectedMethod === 'CARD_CHIP' ? 'VISA' : selectedMethod === 'CARD_NFC' ? 'RUPAY' : undefined,
-          cardLast4: selectedMethod.startsWith('CARD') ? `${Math.floor(1000 + Math.random() * 9000)}` : undefined,
-          upiVpa: selectedMethod.startsWith('UPI') ? 'customer@upi' : undefined,
-          state: validation.state,
-          isOffline: !isOnline,
-          authCode: validation.authCode,
-          declineReason: validation.declineReason,
-          rrn: `RRN${Date.now().toString().slice(-10)}`,
-          createdAt: now,
-          settledAt: isOnline && validation.allowed ? now : undefined
-        };
-
-        await posDb.transactions.put(newRecord);
-
-        setLastTxn(newRecord);
-        setAmountStr('0');
-        setIsProcessing(false);
-
-        if (onTransactionPersisted) {
-          onTransactionPersisted(newRecord);
-        }
-      } catch (err) {
-        console.error('Error persisting transaction to Dexie:', err);
-        setIsProcessing(false);
-      }
-    }, 600);
   };
 
   return (
@@ -176,8 +122,10 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
       {/* Payment Method Selector */}
       <PaymentMethodSelector
         selectedMethod={selectedMethod}
-        onSelectMethod={setSelectedMethod}
-        disabled={isProcessing}
+        onSelectMethod={(method) => {
+          setSelectedMethod(method);
+        }}
+        disabled={isWorkflowModalOpen}
       />
 
       {/* Numeric Keypad */}
@@ -186,31 +134,22 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
         onBackspace={handleBackspace}
         onClear={handleClear}
         onAddPreset={handleAddPreset}
-        disabled={isProcessing}
+        disabled={isWorkflowModalOpen}
       />
 
       {/* Primary Action Button: Charge */}
       <button
         type="button"
-        disabled={numericAmount <= 0 || isProcessing}
+        disabled={numericAmount <= 0}
         onClick={handleInitiatePayment}
         className={`w-full py-3.5 sm:py-4 rounded-xl sm:rounded-2xl font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all duration-200 shadow-xl active:scale-[0.98] ${
-          numericAmount > 0 && !isProcessing
-            ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-emerald-500/20'
+          numericAmount > 0
+            ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-emerald-500/20 cursor-pointer'
             : 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-750'
         }`}
       >
-        {isProcessing ? (
-          <>
-            <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin text-zinc-950" />
-            <span>Validating & Storing in Dexie...</span>
-          </>
-        ) : (
-          <>
-            <span>Charge ₹{numericAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-            <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </>
-        )}
+        <span>Charge ₹{numericAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
       </button>
 
       {/* Recent Transaction Result Banner */}
@@ -249,14 +188,18 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
         </div>
       )}
 
-      {/* Secure PIN Modal */}
-      <PinEntryModal
-        isOpen={isPinModalOpen}
-        onClose={() => setIsPinModalOpen(false)}
-        onPinSubmit={handlePinSubmit}
+      {/* Complete Step-by-Step Payment Workflow Modal */}
+      <PaymentWorkflowModal
+        isOpen={isWorkflowModalOpen}
+        onClose={() => setIsWorkflowModalOpen(false)}
+        method={selectedMethod}
         amount={numericAmount}
-        pinLength={4}
-        isProcessing={isProcessing}
+        isOnline={isOnline}
+        terminalId={terminalId}
+        merchantId={merchantId}
+        merchantName={merchantName}
+        onPaymentSuccess={handlePaymentSuccess}
+        onChangeMethod={(newMethod) => setSelectedMethod(newMethod)}
       />
     </div>
   );
