@@ -1,3 +1,5 @@
+export type MainScreenType = 'HOME' | 'CARDS' | 'ANALYTICS' | 'PROFILE' | 'LOANS';
+
 export type TabType = 'ACCOUNT' | 'CREDIT_CARD' | 'LOAN';
 
 export type CardBrand = 'VISA' | 'RUPAY' | 'MASTERCARD';
@@ -12,6 +14,7 @@ export interface CardData {
   cardHolder: string;
   expiryDate: string;
   cvv: string;
+  pin: string;
   balance: number;
   availableLimit: number;
   totalLimit: number;
@@ -50,4 +53,49 @@ export interface UserProfile {
   merchantName: string;
   rewardPoints: number;
   unreadNotifications: number;
+  phone: string;
+  email: string;
+  isKycVerified: boolean;
+  biometricsEnabled: boolean;
+}
+
+export interface BeneficiaryContact {
+  id: string;
+  name: string;
+  avatar: string;
+  upiId: string;
+  recentAmount?: number;
+}
+
+export interface LoanAccount {
+  id: string;
+  loanNumber: string;
+  type: string;
+  approvedLimit: number;
+  drawnAmount: number;
+  availableCredit: number;
+  interestRate: number;
+  nextEmiDate: string;
+  nextEmiAmount: number;
+  tenureMonths: number;
+  remainingMonths: number;
+}
+
+export interface SpendingCategory {
+  name: string;
+  amount: number;
+  percentage: number;
+  color: string;
+  icon: string;
+}
+
+export interface BrandPerk {
+  id: string;
+  brand: string;
+  title: string;
+  code: string;
+  discount: string;
+  expires: string;
+  iconBg: string;
+  logoText: string;
 }

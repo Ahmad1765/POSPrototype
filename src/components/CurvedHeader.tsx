@@ -21,19 +21,19 @@ export const CurvedHeader: React.FC = () => {
                 ? 'bg-black/20 text-emerald-300 border border-emerald-400/30'
                 : 'bg-black/30 text-amber-300 border border-amber-400/40 animate-pulse'
             }`}
-            title="Click to toggle Online/Offline POS Mode"
+            title="Click to simulate Online/Offline Connection"
           >
             {isOnline ? (
               <>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
                 <Wifi className="w-3.5 h-3.5" />
-                <span>ONLINE • POS-001</span>
+                <span>Connected • Bank Synced</span>
               </>
             ) : (
               <>
-                <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
                 <WifiOff className="w-3.5 h-3.5" />
-                <span>OFFLINE (STORE & FORWARD)</span>
+                <span>Offline Protection Active</span>
               </>
             )}
           </button>
@@ -58,12 +58,15 @@ export const CurvedHeader: React.FC = () => {
         {/* Top Bar: Profile, Greeting & Action Icons */}
         <div className="flex items-center justify-between">
           {/* Left: User Profile Avatar & Greeting */}
-          <div className="flex items-center gap-3">
+          <div 
+            onClick={() => useAppStore.getState().setCurrentScreen('PROFILE')}
+            className="flex items-center gap-3 cursor-pointer group active-press"
+          >
             <div className="relative">
               <img
                 src={user.avatarUrl}
                 alt={user.name}
-                className="w-12 h-12 rounded-full object-cover border-2 border-white/80 shadow-md ring-2 ring-orange-300/40"
+                className="w-12 h-12 rounded-full object-cover border-2 border-white/80 shadow-md ring-2 ring-orange-300/40 group-hover:scale-105 transition-transform"
               />
               <span
                 className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-orange-600 ${
@@ -75,7 +78,7 @@ export const CurvedHeader: React.FC = () => {
               <p className="text-xs font-medium text-orange-100/90 tracking-wide uppercase">
                 {user.greeting},
               </p>
-              <h1 className="text-lg font-bold text-white tracking-tight leading-tight">
+              <h1 className="text-lg font-bold text-white tracking-tight leading-tight group-hover:text-orange-100 transition-colors">
                 {user.name}
               </h1>
             </div>

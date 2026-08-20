@@ -3,86 +3,96 @@ import { Home, CreditCard, QrCode, BarChart3, User } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
 export const BottomNavBar: React.FC = () => {
-  const { openModal, setActiveTab } = useAppStore();
-  const [activeNav, setActiveNav] = React.useState<'HOME' | 'CARDS' | 'ANALYTICS' | 'PROFILE'>('HOME');
+  const { currentScreen, setCurrentScreen, openModal } = useAppStore();
+
+  const navItems = [
+    { id: 'HOME' as const, label: 'Home', icon: Home },
+    { id: 'CARDS' as const, label: 'Cards', icon: CreditCard },
+    { id: 'ANALYTICS' as const, label: 'Insights', icon: BarChart3 },
+    { id: 'PROFILE' as const, label: 'Profile', icon: User },
+  ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-40 px-4 pb-3 pointer-events-none">
-      <div className="relative pointer-events-auto">
-        {/* Navigation Bar Glass Container */}
-        <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-nav-bar border border-slate-200/80 px-6 py-2.5 flex items-center justify-between">
-          
-          {/* 1. Home Tab */}
-          <button
-            onClick={() => {
-              setActiveNav('HOME');
-              setActiveTab('CREDIT_CARD');
-            }}
-            className={`flex flex-col items-center gap-1 active-press transition-colors ${
-              activeNav === 'HOME' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <Home className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Home</span>
-          </button>
-
-          {/* 2. Cards Tab */}
-          <button
-            onClick={() => {
-              setActiveNav('CARDS');
-              openModal('MANAGE_CARD');
-            }}
-            className={`flex flex-col items-center gap-1 active-press transition-colors ${
-              activeNav === 'CARDS' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <CreditCard className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Cards</span>
-          </button>
-
-          {/* 3. Center Elevated Action Button (QR Scanner / Instant POS Pay) */}
-          <div className="relative -top-5 flex flex-col items-center">
-            <button
-              onClick={() => openModal('QR_SCANNER')}
-              className="w-14 h-14 rounded-full bg-gradient-to-tr from-brand-600 to-brand-500 hover:from-brand-550 hover:to-brand-400 text-white flex items-center justify-center shadow-btn-orange active-press border-4 border-white transition-all transform hover:scale-105"
-              aria-label="Scan QR Code"
-            >
-              <QrCode className="w-6 h-6 text-white animate-pulse-slow" />
-            </button>
-            <span className="text-[9px] font-bold text-brand-700 mt-1 uppercase tracking-tight">
-              Scan & Pay
-            </span>
-          </div>
-
-          {/* 4. Analytics Tab */}
-          <button
-            onClick={() => {
-              setActiveNav('ANALYTICS');
-              openModal('REWARDS');
-            }}
-            className={`flex flex-col items-center gap-1 active-press transition-colors ${
-              activeNav === 'ANALYTICS' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <BarChart3 className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Insights</span>
-          </button>
-
-          {/* 5. Profile Tab */}
-          <button
-            onClick={() => {
-              setActiveNav('PROFILE');
-              openModal('NOTIFICATIONS');
-            }}
-            className={`flex flex-col items-center gap-1 active-press transition-colors ${
-              activeNav === 'PROFILE' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <User className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Profile</span>
-          </button>
+    <div className="w-full px-3 pb-3 pt-1 bg-gradient-to-t from-zinc-50 via-zinc-50/95 to-transparent select-none">
+      {/* Floating Glass Dock */}
+      <nav 
+        aria-label="Main Navigation"
+        className="relative bg-white/95 backdrop-blur-2xl rounded-[24px] border border-black/[0.08] shadow-[0_8px_24px_rgba(0,0,0,0.07)] px-2.5 py-1.5 flex items-center justify-between"
+      >
+        {/* Left Nav Pair: Home & Cards */}
+        <div className="flex items-center flex-1 justify-around">
+          {navItems.slice(0, 2).map((item) => {
+            const Icon = item.icon;
+            const isActive = currentScreen === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCurrentScreen(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all duration-150 active-press relative ${
+                  isActive
+                    ? 'text-brand-600 font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                <Icon className="w-5 h-5 stroke-[1.8] transition-transform group-hover:scale-105" />
+                <span className="text-[10px] mt-0.5 tracking-tight font-medium">
+                  {item.label}
+                </span>
+                {isActive && (
+                  <span className="absolute -bottom-0.5 w-1 h-1 rounded-full bg-brand-500" />
+                )}
+              </button>
+            );
+          })}
         </div>
-      </div>
+
+        {/* Center Elevated Action: QR Scanner & Pay */}
+        <div className="relative -top-4 px-1 flex flex-col items-center shrink-0">
+          <button
+            onClick={() => openModal('QR_SCANNER')}
+            className="w-12 h-12 rounded-full bg-gradient-to-tr from-brand-600 via-brand-550 to-brand-400 hover:from-brand-550 hover:to-brand-400 text-white flex items-center justify-center shadow-[0_6px_16px_rgba(224,83,0,0.36)] active-press border-[3px] border-white transition-all transform hover:scale-105"
+            aria-label="Scan or Show QR Code"
+            title="Scan or Show QR Code"
+          >
+            <QrCode className="w-5 h-5 text-white" />
+          </button>
+          <span className="text-[9px] font-bold text-zinc-700 mt-0.5 uppercase tracking-wider font-mono">
+            Pay
+          </span>
+        </div>
+
+        {/* Right Nav Pair: Insights & Profile */}
+        <div className="flex items-center flex-1 justify-around">
+          {navItems.slice(2, 4).map((item) => {
+            const Icon = item.icon;
+            const isActive = currentScreen === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCurrentScreen(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all duration-150 active-press relative ${
+                  isActive
+                    ? 'text-brand-600 font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                <Icon className="w-5 h-5 stroke-[1.8] transition-transform group-hover:scale-105" />
+                <span className="text-[10px] mt-0.5 tracking-tight font-medium">
+                  {item.label}
+                </span>
+                {isActive && (
+                  <span className="absolute -bottom-0.5 w-1 h-1 rounded-full bg-brand-500" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* iOS Home Indicator Bar */}
+      <div className="w-24 h-1 bg-zinc-300 rounded-full mx-auto mt-2" />
     </div>
   );
 };
