@@ -30,33 +30,33 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     {
       id: 'OVERVIEW',
       label: 'Overview',
-      icon: <LayoutDashboard className="w-4 h-4" />
+      icon: <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
     },
     {
       id: 'TRANSACTIONS',
-      label: 'Transactions',
-      icon: <ReceiptText className="w-4 h-4" />
+      label: 'Ledger',
+      icon: <ReceiptText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
     },
     {
       id: 'TERMINALS',
       label: 'Terminals',
-      icon: <Terminal className="w-4 h-4" />,
-      badge: '1 Online'
+      icon: <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />,
+      badge: '1 Live'
     },
     {
       id: 'SETTINGS',
       label: 'Settings',
-      icon: <Settings className="w-4 h-4" />
+      icon: <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
     }
   ];
 
   return (
-    <aside className="w-full lg:w-64 bg-zinc-900/90 border-b lg:border-b-0 lg:border-r border-zinc-800/80 p-4 flex flex-col justify-between select-none shrink-0 backdrop-blur-xl">
-      <div className="flex flex-col gap-6">
+    <aside className="w-full lg:w-64 bg-zinc-900/90 border-b lg:border-b-0 lg:border-r border-zinc-800/80 p-2 sm:p-4 flex flex-col justify-between select-none shrink-0 backdrop-blur-xl">
+      <div className="flex flex-col gap-2 lg:gap-6">
         
-        {/* Merchant Branding */}
-        <div className="flex items-center gap-3 px-2 py-1.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700/60 flex items-center justify-center text-emerald-400 font-bold text-sm shadow-inner">
+        {/* Merchant Branding (shown on desktop, compact on mobile) */}
+        <div className="hidden lg:flex items-center gap-3 px-2 py-1.5">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700/60 flex items-center justify-center text-emerald-400 font-bold text-sm shadow-inner shrink-0">
             <Store className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="overflow-hidden">
@@ -68,8 +68,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           </div>
         </div>
 
-        {/* Navigation Links */}
-        <nav className="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:overflow-x-visible pb-1 lg:pb-0">
+        {/* Navigation Links (Grid on mobile, column on desktop) */}
+        <nav className="grid grid-cols-4 lg:flex lg:flex-col gap-1 p-1 bg-zinc-950/60 lg:bg-transparent rounded-xl border lg:border-none border-zinc-800/80">
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             return (
@@ -77,15 +77,15 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => onSelectTab(item.id)}
-                className={`w-full px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between transition-all duration-150 active:scale-[0.98] ${
+                className={`py-2 px-1.5 sm:px-3 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-medium flex flex-col lg:flex-row items-center justify-center lg:justify-between gap-1 sm:gap-2.5 transition-all duration-150 active:scale-[0.98] ${
                   isActive
                     ? 'bg-zinc-800 text-white font-semibold shadow-sm border border-zinc-700/60'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850/60 border border-transparent'
                 }`}
               >
-                <div className="flex items-center gap-2.5">
+                <div className="flex flex-col lg:flex-row items-center gap-1 lg:gap-2.5">
                   <span className={isActive ? 'text-emerald-400' : 'text-zinc-400'}>{item.icon}</span>
-                  <span>{item.label}</span>
+                  <span className="truncate">{item.label}</span>
                 </div>
                 {item.badge && (
                   <span className="hidden lg:inline-block text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50">
@@ -98,7 +98,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         </nav>
       </div>
 
-      {/* Bottom Section: Active Terminal & Mode Switcher */}
+      {/* Bottom Section for Desktop */}
       <div className="hidden lg:flex flex-col gap-3 pt-6 border-t border-zinc-800/80">
         
         {/* Terminal Info Card */}
@@ -110,7 +110,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           <div className="font-mono text-zinc-200 text-xs font-semibold">{terminalCode}</div>
           <div className="text-[10px] text-zinc-500 flex items-center gap-1 mt-1">
             <ShieldCheck className="w-3 h-3 text-emerald-500" />
-            <span>Dexie IndexedDB Sync OK</span>
+            <span>Dexie IndexedDB Live</span>
           </div>
         </div>
 
