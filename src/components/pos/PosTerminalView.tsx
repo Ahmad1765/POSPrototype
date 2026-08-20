@@ -1,34 +1,30 @@
 import React, { useState } from 'react';
 import { PosKeypad } from './PosKeypad';
-import { PaymentMethodSelector, type PaymentMethodType } from './PaymentMethodSelector';
+import { PaymentMethodSelector } from './PaymentMethodSelector';
 import { PinEntryModal } from './PinEntryModal';
-import { ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, RefreshCw, FileText } from 'lucide-react';
+import { posDb } from '../../db/db';
+import { validateTransactionRules } from '../../utils/rulesEngine';
+import type { PaymentMethodType, PosTransactionRecord } from '../../types/pos';
+import { ShieldCheck, AlertCircle, CheckCircle2, ArrowRight, RefreshCw, XCircle } from 'lucide-react';
 
 interface PosTerminalViewProps {
   isOnline?: boolean;
-  onPaymentComplete?: (details: {
-    amount: number;
-    method: PaymentMethodType;
-    isOffline: boolean;
-  }) => void;
+  terminalId?: string;
+  merchantId?: string;
+  onTransactionPersisted?: (txn: PosTransactionRecord) => void;
 }
 
 export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
   isOnline = true,
-  onPaymentComplete
+  terminalId = 'TERM-MUM-001',
+  merchantId = 'MERCHANT-MUM-01',
+  onTransactionPersisted
 }) => {
   const [amountStr, setAmountStr] = useState<string>('0');
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>('CARD_NFC');
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [lastSuccessTxn, setLastSuccessTxn] = useState<{
-    id: string;
-    amount: number;
-    method: PaymentMethodType;
-    timestamp: string;
-    authCode: string;
-    isOffline: boolean;
-  } | null>(null);
+  const [lastTxn, setLastTxn] = useState<PosTransactionRecord | null>(null);
 
   const numericAmount = parseFloat(amountStr) || 0;
 
@@ -43,12 +39,10 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
     if (amountStr === '0') {
       setAmountStr(digit);
     } else {
-      // Limit to 2 decimal places if dot exists
       if (amountStr.includes('.')) {
         const [, decimals] = amountStr.split('.');
         if (decimals && decimals.length >= 2) return;
       }
-      // Limit max digits
       if (amountStr.length >= 8) return;
       setAmountStr(prev => prev + digit);
     }
@@ -76,44 +70,72 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
   const handleInitiatePayment = () => {
     if (numericAmount <= 0) return;
 
-    // If Chip & PIN, open PIN Modal
     if (selectedMethod === 'CARD_CHIP') {
       setIsPinModalOpen(true);
     } else {
-      // Direct simulation with simple setTimeout (No complex backend!)
-      processPaymentMock();
+      processTransaction();
     }
   };
 
   const handlePinSubmit = (_pin: string) => {
     setIsPinModalOpen(false);
-    processPaymentMock();
+    processTransaction();
   };
 
-  const processPaymentMock = () => {
+  const processTransaction = async () => {
     setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
-      const txnRecord = {
-        id: `TXN-${Date.now().toString().slice(-6)}`,
-        amount: numericAmount,
-        method: selectedMethod,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        authCode: `AUTH${Math.floor(100000 + Math.random() * 900000)}`,
-        isOffline: !isOnline
-      };
 
-      setLastSuccessTxn(txnRecord);
-      setAmountStr('0');
-
-      if (onPaymentComplete) {
-        onPaymentComplete({
+    // Simulate processing latency with setTimeout
+    setTimeout(async () => {
+      try {
+        // 1. Evaluate mock offline rules
+        const validation = await validateTransactionRules({
           amount: numericAmount,
-          method: selectedMethod,
-          isOffline: !isOnline
+          paymentMethod: selectedMethod,
+          isOnline
         });
+
+        const now = new Date().toISOString();
+        const clientUuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `uuid-${Date.now()}`;
+        const txnId = `TXN-${Math.floor(10000 + Math.random() * 90000)}`;
+
+        const newRecord: PosTransactionRecord = {
+          id: txnId,
+          clientUuid,
+          terminalId,
+          merchantId,
+          amount: numericAmount,
+          currency: 'INR',
+          paymentMethod: selectedMethod,
+          cardNetwork: selectedMethod === 'CARD_CHIP' ? 'VISA' : selectedMethod === 'CARD_NFC' ? 'RUPAY' : undefined,
+          cardLast4: selectedMethod.startsWith('CARD') ? `${Math.floor(1000 + Math.random() * 9000)}` : undefined,
+          upiVpa: selectedMethod.startsWith('UPI') ? 'customer@upi' : undefined,
+          state: validation.state,
+          isOffline: !isOnline,
+          authCode: validation.authCode,
+          declineReason: validation.declineReason,
+          rrn: `RRN${Date.now().toString().slice(-10)}`,
+          createdAt: now,
+          settledAt: isOnline && validation.allowed ? now : undefined
+        };
+
+        // 2. Persist record directly to Dexie IndexedDB
+        await posDb.transactions.put(newRecord);
+
+        // Update local state
+        setLastTxn(newRecord);
+        setAmountStr('0');
+        setIsProcessing(false);
+
+        // Notify parent container
+        if (onTransactionPersisted) {
+          onTransactionPersisted(newRecord);
+        }
+      } catch (err) {
+        console.error('Error persisting transaction to Dexie:', err);
+        setIsProcessing(false);
       }
-    }, 800);
+    }, 600);
   };
 
   return (
@@ -126,7 +148,7 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
             <div>
               <div className="font-semibold text-amber-100">Offline Standalone Mode</div>
-              <div className="text-[10px] text-amber-300/80">Local queue active • ₹500 RBI max ceiling</div>
+              <div className="text-[10px] text-amber-300/80">Dexie IndexedDB queue • ₹500 RBI max ceiling</div>
             </div>
           </div>
           <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/30">
@@ -152,7 +174,7 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
         {/* RBI Compliance Notice */}
         <div className="mt-2 flex items-center gap-1 text-[10px] text-zinc-500">
           <ShieldCheck className="w-3 h-3 text-emerald-500" />
-          <span>Instant Settlement Ready • Encrypted EMV</span>
+          <span>Local Dexie IndexedDB Connected • Encrypted Store</span>
         </div>
       </div>
 
@@ -186,7 +208,7 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
         {isProcessing ? (
           <>
             <RefreshCw className="w-4 h-4 animate-spin text-zinc-950" />
-            <span>Processing Authorization...</span>
+            <span>Validating & Storing in Dexie...</span>
           </>
         ) : (
           <>
@@ -196,27 +218,39 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
         )}
       </button>
 
-      {/* Recent Success Pill (If available) */}
-      {lastSuccessTxn && (
-        <div className="w-full p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-200 text-xs flex items-center justify-between animate-fade-in">
+      {/* Recent Transaction Result Banner */}
+      {lastTxn && (
+        <div className={`w-full p-3.5 rounded-2xl border text-xs flex items-center justify-between animate-fade-in ${
+          lastTxn.state === 'DECLINED'
+            ? 'bg-rose-950/30 border-rose-500/40 text-rose-200'
+            : lastTxn.isOffline
+            ? 'bg-amber-950/30 border-amber-500/40 text-amber-200'
+            : 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200'
+        }`}>
           <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            {lastTxn.state === 'DECLINED' ? (
+              <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            )}
             <div>
-              <div className="font-semibold text-emerald-100">
-                ₹{lastSuccessTxn.amount.toFixed(2)} Approved ({lastSuccessTxn.isOffline ? 'Offline Stored' : 'Online'})
+              <div className="font-semibold text-zinc-100 flex items-center gap-1.5">
+                <span>₹{lastTxn.amount.toFixed(2)}</span>
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded uppercase ${
+                  lastTxn.state === 'DECLINED'
+                    ? 'bg-rose-500/20 text-rose-300'
+                    : lastTxn.state === 'OFFLINE_PENDING'
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'bg-emerald-500/20 text-emerald-300'
+                }`}>
+                  {lastTxn.state.replace('_', ' ')}
+                </span>
               </div>
-              <div className="text-[10px] text-emerald-400/80 font-mono">
-                {lastSuccessTxn.id} • {lastSuccessTxn.authCode}
+              <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                {lastTxn.declineReason || `${lastTxn.id} • ${lastTxn.authCode || 'Stored locally in IndexedDB'}`}
               </div>
             </div>
           </div>
-          <button
-            onClick={() => alert(`Receipt for ${lastSuccessTxn.id}\nAmount: ₹${lastSuccessTxn.amount}\nStatus: APPROVED`)}
-            className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors"
-            title="View Receipt"
-          >
-            <FileText className="w-4 h-4" />
-          </button>
         </div>
       )}
 
