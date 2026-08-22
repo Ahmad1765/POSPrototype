@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  X, Check, Delete, Radio, CreditCard, Zap, Wallet,
+  X, Delete, Radio, CreditCard, Zap, Wallet,
   ShieldCheck, AlertCircle, CheckCircle2, Volume2, ArrowRight,
   Sparkles, Smartphone, Lock, XCircle, RotateCcw, Link2, Hash, QrCode
 } from 'lucide-react';
@@ -56,7 +56,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
   const [declineReason, setDeclineReason] = useState<string>('');
   const [selectedCardNetwork, setSelectedCardNetwork] = useState<CardNetwork>('RUPAY');
   const [cardLast4, setCardLast4] = useState<string>('4829');
-  const [customerVpa, setCustomerVpa] = useState<string>('customer@okhdfcbank');
+  const [customerVpa] = useState<string>('customer@okhdfcbank');
   const [soundboxAlert, setSoundboxAlert] = useState<string | null>(null);
   const [completedTxn, setCompletedTxn] = useState<PosTransactionRecord | null>(null);
 
