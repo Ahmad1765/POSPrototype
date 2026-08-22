@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { PosTransactionRecord, TransactionState } from '../../types/pos';
 import { 
-  Search, CreditCard, Radio, QrCode, Zap, 
+  Search, CreditCard, Radio, Wallet, Zap, 
   CheckCircle2, AlertCircle, XCircle, ArrowUpDown, Clock
 } from 'lucide-react';
 
@@ -50,11 +50,11 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
             <span>EMV Chip</span>
           </div>
         );
-      case 'UPI_QR':
+      case 'CRYPTO_WALLET':
         return (
           <div className="flex items-center gap-1.5 text-zinc-300">
-            <QrCode className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <span>UPI QR</span>
+            <Wallet className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <span>Crypto</span>
           </div>
         );
       case 'UPI_LITE':

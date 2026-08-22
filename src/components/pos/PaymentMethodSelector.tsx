@@ -1,5 +1,5 @@
 import React from 'react';
-import { CreditCard, Radio, QrCode, Zap } from 'lucide-react';
+import { CreditCard, Radio, Zap, Wallet } from 'lucide-react';
 import type { PaymentMethodType } from '../../types/pos';
 
 interface PaymentMethodSelectorProps {
@@ -34,17 +34,17 @@ export const PaymentMethodSelector: React.FC<PaymentMethodSelectorProps> = ({
       icon: <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
     },
     {
-      id: 'UPI_QR',
-      label: 'UPI Dynamic QR',
-      sublabel: 'Scan & Pay',
-      icon: <QrCode className="w-4 h-4 sm:w-5 sm:h-5" />,
-      badge: 'Instant'
-    },
-    {
       id: 'UPI_LITE',
       label: 'UPI Lite',
       sublabel: 'On-device Offline',
       icon: <Zap className="w-4 h-4 sm:w-5 sm:h-5" />,
+      badge: 'Offline OK'
+    },
+    {
+      id: 'CRYPTO_WALLET',
+      label: 'Crypto Wallet',
+      sublabel: 'QR Scan & Sign',
+      icon: <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />,
       badge: 'Offline OK'
     }
   ];
@@ -53,7 +53,7 @@ export const PaymentMethodSelector: React.FC<PaymentMethodSelectorProps> = ({
     <div className="w-full flex flex-col gap-1.5 sm:gap-2 select-none">
       <div className="flex items-center justify-between text-[11px] sm:text-xs font-semibold text-zinc-400 px-0.5">
         <span>PAYMENT METHOD</span>
-        <span className="text-[9px] sm:text-[10px] text-zinc-500 font-mono">EMV / NPCI</span>
+        <span className="text-[9px] sm:text-[10px] text-zinc-500 font-mono">EMV / CHAIN</span>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
@@ -101,3 +101,4 @@ export const PaymentMethodSelector: React.FC<PaymentMethodSelectorProps> = ({
     </div>
   );
 };
+

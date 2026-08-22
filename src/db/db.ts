@@ -32,7 +32,9 @@ export async function initializePosDb(): Promise<PosTerminalRecord> {
     maxOfflineCumulativeCap: 2000.00,
     currentOfflineCumulative: 0.00,
     firmwareVersion: '3.4.2-PRO',
-    lastHeartbeat: new Date().toISOString()
+    lastHeartbeat: new Date().toISOString(),
+    cryptoReceivingAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18',
+    cryptoDefaultChain: 'USDT_TRC20'
   };
 
   await posDb.terminals.put(defaultTerminal);
@@ -89,6 +91,25 @@ export async function initializePosDb(): Promise<PosTerminalRecord> {
         rrn: 'RRN-9920194819',
         createdAt: new Date(Date.now() - 10 * 60000).toISOString(),
         settledAt: new Date(Date.now() - 8 * 60000).toISOString()
+      },
+      {
+        id: 'TXN-90208',
+        clientUuid: '550e8400-e29b-41d4-a716-446655440004',
+        terminalId: 'TERM-MUM-001',
+        merchantId: 'MERCHANT-MUM-01',
+        amount: 250.00,
+        currency: 'INR',
+        paymentMethod: 'CRYPTO_WALLET',
+        cryptoWalletAddress: '0x1a2B3c4D5e6F7a8B9c0D1E2f3A4b5C6d7E8f9A0B',
+        cryptoChain: 'USDT_TRC20',
+        cryptoTxHash: '0xa3b9c21e4f6d8e09',
+        cryptoAmountToken: '3.00000000',
+        state: 'OFFLINE_PENDING',
+        isOffline: true,
+        offlineSequenceNumber: 2,
+        authCode: 'CRYPTO-OFF-2001',
+        rrn: 'RRN-9920194820',
+        createdAt: new Date(Date.now() - 15 * 60000).toISOString()
       }
     ];
 
@@ -97,3 +118,4 @@ export async function initializePosDb(): Promise<PosTerminalRecord> {
 
   return defaultTerminal;
 }
+

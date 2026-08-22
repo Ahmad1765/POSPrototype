@@ -16,9 +16,11 @@ export type TransactionState =
   | 'DUPLICATE'
   | 'REQUIRES_REVIEW';
 
-export type PaymentMethodType = 'CARD_CHIP' | 'CARD_NFC' | 'UPI_QR' | 'UPI_LITE';
+export type PaymentMethodType = 'CARD_CHIP' | 'CARD_NFC' | 'UPI_LITE' | 'CRYPTO_WALLET';
 
 export type CardNetwork = 'VISA' | 'MASTERCARD' | 'RUPAY' | 'AMEX' | 'UPI';
+
+export type CryptoChain = 'ETH' | 'BTC' | 'USDT_TRC20' | 'SOL';
 
 export interface PosTerminalRecord {
   id: string;
@@ -31,6 +33,9 @@ export interface PosTerminalRecord {
   currentOfflineCumulative: number;
   firmwareVersion: string;
   lastHeartbeat: string;
+  // Crypto wallet receiving address for the merchant
+  cryptoReceivingAddress?: string;
+  cryptoDefaultChain?: CryptoChain;
 }
 
 export interface PosTransactionRecord {
@@ -44,6 +49,11 @@ export interface PosTransactionRecord {
   cardNetwork?: CardNetwork;
   cardLast4?: string;
   upiVpa?: string;
+  // Crypto-specific fields for store-and-forward
+  cryptoWalletAddress?: string; // Customer's wallet address
+  cryptoChain?: CryptoChain;
+  cryptoTxHash?: string; // Signed transaction hash (offline-generated)
+  cryptoAmountToken?: string; // Amount in crypto token units
   state: TransactionState;
   isOffline: boolean;
   authCode?: string;

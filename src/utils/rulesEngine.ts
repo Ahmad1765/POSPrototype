@@ -9,7 +9,7 @@ export interface ValidationParams {
 }
 
 export async function validateTransactionRules(params: ValidationParams): Promise<OfflineValidationResult> {
-  const { amount, isOnline } = params;
+  const { amount, paymentMethod, isOnline } = params;
 
   // 1. Basic sanity validation
   if (amount <= 0) {
@@ -20,7 +20,34 @@ export async function validateTransactionRules(params: ValidationParams): Promis
     };
   }
 
-  // 2. Online Mode Rules
+  // 2. Crypto Wallet specific rules
+  if (paymentMethod === 'CRYPTO_WALLET') {
+    if (amount < 10) {
+      return {
+        allowed: false,
+        state: 'DECLINED',
+        declineReason: 'Crypto minimum transaction amount is ₹10.00 (gas fee threshold)'
+      };
+    }
+
+    // Crypto transactions are signed offline and broadcast later
+    // They always start as OFFLINE_PENDING regardless of connectivity
+    if (isOnline) {
+      return {
+        allowed: true,
+        state: 'SETTLED',
+        authCode: `CRYPTO-ON-${Math.floor(100000 + Math.random() * 900000)}`
+      };
+    }
+
+    return {
+      allowed: true,
+      state: 'OFFLINE_PENDING',
+      authCode: `CRYPTO-OFF-${Math.floor(1000 + Math.random() * 9000)}`
+    };
+  }
+
+  // 3. Online Mode Rules (for non-crypto)
   if (isOnline) {
     return {
       allowed: true,
@@ -29,7 +56,7 @@ export async function validateTransactionRules(params: ValidationParams): Promis
     };
   }
 
-  // 3. Offline Mode Compliance Rules (RBI Framework)
+  // 4. Offline Mode Compliance Rules (RBI Framework)
   
   // Rule A: ₹500 per-transaction ceiling
   if (amount > 500.00) {
@@ -73,3 +100,4 @@ export async function validateTransactionRules(params: ValidationParams): Promis
     };
   }
 }
+

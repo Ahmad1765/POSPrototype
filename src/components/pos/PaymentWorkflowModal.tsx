@@ -1,13 +1,29 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  X, Check, Delete, Radio, CreditCard, QrCode, Zap,
-  ShieldCheck, AlertCircle, CheckCircle2, Copy, Volume2, ArrowRight,
-  Sparkles, Smartphone, Lock, XCircle, RotateCcw
+  X, Check, Delete, Radio, CreditCard, Zap, Wallet,
+  ShieldCheck, AlertCircle, CheckCircle2, Volume2, ArrowRight,
+  Sparkles, Smartphone, Lock, XCircle, RotateCcw, Link2, Hash, QrCode
 } from 'lucide-react';
 import { DynamicQrCode } from './DynamicQrCode';
 import { validateTransactionRules } from '../../utils/rulesEngine';
 import { posDb } from '../../db/db';
-import type { PaymentMethodType, PosTransactionRecord, CardNetwork } from '../../types/pos';
+import type { PaymentMethodType, PosTransactionRecord, CardNetwork, CryptoChain } from '../../types/pos';
+
+// Demo merchant crypto addresses per chain
+const MERCHANT_CRYPTO_ADDRESSES: Record<CryptoChain, string> = {
+  ETH: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18',
+  BTC: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
+  USDT_TRC20: 'TJYjR7BwzSc8HMvGHKnTiDnRBfNqRj5eCA',
+  SOL: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+};
+
+const CHAIN_DISPLAY: Record<CryptoChain, { label: string; symbol: string; color: string; rate: number }> = {
+  ETH: { label: 'Ethereum', symbol: 'ETH', color: 'text-indigo-400', rate: 0.0000046 },
+  BTC: { label: 'Bitcoin', symbol: 'BTC', color: 'text-amber-400', rate: 0.00000018 },
+  USDT_TRC20: { label: 'USDT (TRC-20)', symbol: 'USDT', color: 'text-emerald-400', rate: 0.012 },
+  SOL: { label: 'Solana', symbol: 'SOL', color: 'text-violet-400', rate: 0.000085 }
+};
 
 interface PaymentWorkflowModalProps {
   isOpen: boolean;
@@ -35,20 +51,18 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
   onChangeMethod
 }) => {
   // Modal Steps & Workflow States
-  // Steps: 'IDLE' | 'READING' | 'PIN_ENTRY' | 'AUTHORIZING' | 'REMOVE_CARD' | 'APPROVED' | 'DECLINED'
   const [step, setStep] = useState<'IDLE' | 'READING' | 'PIN_ENTRY' | 'AUTHORIZING' | 'REMOVE_CARD' | 'APPROVED' | 'DECLINED'>('IDLE');
   const [pin, setPin] = useState<string>('');
   const [declineReason, setDeclineReason] = useState<string>('');
   const [selectedCardNetwork, setSelectedCardNetwork] = useState<CardNetwork>('RUPAY');
   const [cardLast4, setCardLast4] = useState<string>('4829');
   const [customerVpa, setCustomerVpa] = useState<string>('customer@okhdfcbank');
-  const [selectedUpiApp, setSelectedUpiApp] = useState<string>('Google Pay');
-  const [qrCountdown, setQrCountdown] = useState<number>(180);
-  const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [soundboxAlert, setSoundboxAlert] = useState<string | null>(null);
   const [completedTxn, setCompletedTxn] = useState<PosTransactionRecord | null>(null);
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Crypto-specific state
+  const [selectedChain, setSelectedChain] = useState<CryptoChain>('USDT_TRC20');
+  const [customerCryptoAddress, setCustomerCryptoAddress] = useState<string>('');
 
   // Initialize or reset when modal opens or method changes
   useEffect(() => {
@@ -58,37 +72,18 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       setDeclineReason('');
       setSoundboxAlert(null);
       setCompletedTxn(null);
-      setQrCountdown(180);
       setCardLast4(`${Math.floor(1000 + Math.random() * 9000)}`);
+      setCustomerCryptoAddress('');
       
       if (method === 'CARD_NFC') {
         setSelectedCardNetwork('RUPAY');
       } else if (method === 'CARD_CHIP') {
         setSelectedCardNetwork('VISA');
+      } else if (method === 'CRYPTO_WALLET') {
+        setSelectedChain('USDT_TRC20');
       }
     }
   }, [isOpen, method]);
-
-  // QR Countdown Timer
-  useEffect(() => {
-    if (isOpen && method === 'UPI_QR' && step === 'IDLE') {
-      timerRef.current = setInterval(() => {
-        setQrCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current!);
-            setDeclineReason('Dynamic QR Session Expired (3-minute timeout)');
-            setStep('DECLINED');
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isOpen, method, step]);
 
   // Soundbox Voice Alert Effect
   const triggerSoundbox = (msg: string) => {
@@ -99,7 +94,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
   };
 
   // Complete and save transaction to Dexie IndexedDB
-  const finalizeTransaction = useCallback(async (forcedNetwork?: CardNetwork, customVpa?: string) => {
+  const finalizeTransaction = useCallback(async (forcedNetwork?: CardNetwork, customVpa?: string, cryptoAddr?: string, chain?: CryptoChain) => {
     setStep('AUTHORIZING');
 
     try {
@@ -123,7 +118,12 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
         paymentMethod: method,
         cardNetwork: (method === 'CARD_CHIP' || method === 'CARD_NFC') ? (forcedNetwork || selectedCardNetwork) : undefined,
         cardLast4: (method === 'CARD_CHIP' || method === 'CARD_NFC') ? cardLast4 : undefined,
-        upiVpa: method.startsWith('UPI') ? (customVpa || customerVpa) : undefined,
+        upiVpa: method === 'UPI_LITE' ? (customVpa || customerVpa) : undefined,
+        // Crypto fields
+        cryptoWalletAddress: method === 'CRYPTO_WALLET' ? (cryptoAddr || customerCryptoAddress) : undefined,
+        cryptoChain: method === 'CRYPTO_WALLET' ? (chain || selectedChain) : undefined,
+        cryptoTxHash: method === 'CRYPTO_WALLET' ? `0x${Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}` : undefined,
+        cryptoAmountToken: method === 'CRYPTO_WALLET' ? (amount * (CHAIN_DISPLAY[chain || selectedChain]?.rate || 0.012)).toFixed(8) : undefined,
         state: validation.state,
         isOffline: !isOnline,
         authCode: validation.authCode,
@@ -142,10 +142,11 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       } else {
         // Trigger voice soundbox announcement
         const amountFormatted = `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-        if (method === 'UPI_QR') {
-          triggerSoundbox(`${amountFormatted} received on UPI via ${selectedUpiApp}!`);
-        } else if (method === 'UPI_LITE') {
+        if (method === 'UPI_LITE') {
           triggerSoundbox(`${amountFormatted} received on UPI Lite Offline!`);
+        } else if (method === 'CRYPTO_WALLET') {
+          const chainInfo = CHAIN_DISPLAY[chain || selectedChain];
+          triggerSoundbox(`${amountFormatted} signed via ${chainInfo.label}! ${newRecord.isOffline ? 'Queued for broadcast.' : 'Confirmed on-chain.'}`);
         } else {
           triggerSoundbox(`${amountFormatted} approved on ${newRecord.cardNetwork || 'Card'}!`);
         }
@@ -162,7 +163,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       setDeclineReason('Dexie Database Storage Error');
       setStep('DECLINED');
     }
-  }, [amount, cardLast4, customerVpa, isOnline, merchantId, method, onPaymentSuccess, selectedCardNetwork, selectedUpiApp, terminalId]);
+  }, [amount, cardLast4, customerVpa, customerCryptoAddress, isOnline, merchantId, method, onPaymentSuccess, selectedCardNetwork, selectedChain, terminalId]);
 
   if (!isOpen) return null;
 
@@ -196,31 +197,30 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
     setStep('APPROVED');
   };
 
-  // --- UPI Dynamic QR Handlers ---
-  const upiIntentUri = `upi://pay?pa=metrocoffee@okhdfcbank&pn=${encodeURIComponent(merchantName)}&am=${amount.toFixed(2)}&cu=INR&tr=${Date.now()}&tn=POS+Order`;
-
-  const handleCopyUpiLink = () => {
-    navigator.clipboard?.writeText(upiIntentUri);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
-  const handleSimulateUpiAppPayment = (appName: string, vpa: string) => {
-    setSelectedUpiApp(appName);
-    setCustomerVpa(vpa);
-    setStep('READING');
-
-    setTimeout(() => {
-      finalizeTransaction(undefined, vpa);
-    }, 800);
-  };
-
   // --- UPI Lite Handlers ---
   const handleSimulateUpiLitePay = () => {
     setStep('READING');
     setTimeout(() => {
       finalizeTransaction(undefined, 'user9823@npci-lite');
     }, 450);
+  };
+
+  // --- Crypto Wallet Handlers ---
+  const handleSimulateCryptoScan = (chain: CryptoChain) => {
+    const demoAddresses: Record<CryptoChain, string> = {
+      ETH: '0x1a2B3c4D5e6F7a8B9c0D1E2f3A4b5C6d7E8f9A0B',
+      BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+      USDT_TRC20: 'TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE',
+      SOL: '3Kzh9qAqVWQhEsfJDjHKLYNMkdasX7bUTaEoLXZhNhR5'
+    };
+
+    setSelectedChain(chain);
+    setCustomerCryptoAddress(demoAddresses[chain]);
+    setStep('READING');
+
+    setTimeout(() => {
+      finalizeTransaction(undefined, undefined, demoAddresses[chain], chain);
+    }, 1200);
   };
 
   // --- PIN Keypad Handlers ---
@@ -251,12 +251,12 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
     ['CLR', '0', '⌫']
   ];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in select-none">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in select-none">
       
       {/* Voice Soundbox Toast */}
       {soundboxAlert && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-60 bg-emerald-500 text-zinc-950 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 font-bold text-xs sm:text-sm animate-bounce border-2 border-emerald-300">
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[110] bg-emerald-500 text-zinc-950 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 font-bold text-xs sm:text-sm animate-bounce border-2 border-emerald-300">
           <Volume2 className="w-5 h-5 animate-pulse shrink-0" />
           <span>🔊 Soundbox: "{soundboxAlert}"</span>
         </div>
@@ -270,15 +270,15 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
             <div className="w-7 h-7 rounded-xl bg-zinc-800 border border-zinc-700/60 flex items-center justify-center text-emerald-400">
               {method === 'CARD_NFC' && <Radio className="w-4 h-4" />}
               {method === 'CARD_CHIP' && <CreditCard className="w-4 h-4" />}
-              {method === 'UPI_QR' && <QrCode className="w-4 h-4" />}
               {method === 'UPI_LITE' && <Zap className="w-4 h-4" />}
+              {method === 'CRYPTO_WALLET' && <Wallet className="w-4 h-4" />}
             </div>
             <div>
               <div className="text-xs sm:text-sm font-bold text-zinc-100">
                 {method === 'CARD_NFC' && 'Contactless Tap to Pay'}
                 {method === 'CARD_CHIP' && 'EMV Chip & PIN Insertion'}
-                {method === 'UPI_QR' && 'UPI Dynamic QR Code'}
                 {method === 'UPI_LITE' && 'UPI Lite On-Device Wallet'}
+                {method === 'CRYPTO_WALLET' && 'Crypto Wallet Payment'}
               </div>
               <div className="text-[10px] text-zinc-400 font-mono">
                 {merchantName} • {terminalId}
@@ -447,86 +447,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
         )}
 
         {/* ======================================================== */}
-        {/* WORKFLOW VIEW 3: UPI DYNAMIC QR (UPI_QR) */}
-        {/* ======================================================== */}
-        {method === 'UPI_QR' && step === 'IDLE' && (
-          <div className="w-full flex flex-col items-center gap-3.5 py-1">
-            
-            {/* Dynamic QR Code Box */}
-            <div className="relative p-2 rounded-2xl bg-zinc-950 border border-zinc-800 shadow-inner flex flex-col items-center">
-              <DynamicQrCode
-                value={upiIntentUri}
-                size={190}
-                logo={
-                  <div className="w-6 h-6 rounded bg-emerald-500 flex items-center justify-center font-black text-[10px] text-zinc-950">
-                    UPI
-                  </div>
-                }
-              />
-              
-              {/* Scan laser animation overlay */}
-              <div className="absolute inset-x-4 top-2 h-1 bg-emerald-400/80 rounded-full shadow-[0_0_12px_rgba(52,211,153,1)] animate-bounce pointer-events-none" />
-            </div>
-
-            {/* Countdown Timer & VPA Display */}
-            <div className="flex flex-col items-center gap-1 text-center">
-              <div className="flex items-center gap-1.5 text-xs font-mono font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1 rounded-full">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span>Expires in {Math.floor(qrCountdown / 60)}:{(qrCountdown % 60).toString().padStart(2, '0')}</span>
-              </div>
-              <div className="text-[11px] text-zinc-400">
-                Scan with any UPI app to pay <strong className="text-white">₹{amount.toFixed(2)}</strong>
-              </div>
-            </div>
-
-            {/* Supported UPI Apps Badges */}
-            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-              {['Google Pay', 'PhonePe', 'Paytm', 'BHIM', 'Cred'].map((app) => (
-                <span key={app} className="text-[9px] font-semibold px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 border border-zinc-700/60">
-                  {app}
-                </span>
-              ))}
-            </div>
-
-            {/* Interactive Simulation Controls */}
-            <div className="w-full flex flex-col gap-2 pt-2 border-t border-zinc-800">
-              <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-400">
-                <span>SIMULATE CUSTOMER SCAN</span>
-                <button
-                  type="button"
-                  onClick={handleCopyUpiLink}
-                  className="text-emerald-400 hover:underline flex items-center gap-1"
-                >
-                  {copiedLink ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedLink ? 'Copied Link!' : 'Copy UPI Link'}</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSimulateUpiAppPayment('Google Pay', 'customer@okaxis')}
-                  className="py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-750 active:scale-95 border border-zinc-700 flex items-center justify-center gap-1.5 text-xs font-semibold text-zinc-200 transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Pay via GPay</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSimulateUpiAppPayment('PhonePe', 'customer@ybl')}
-                  className="py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-750 active:scale-95 border border-zinc-700 flex items-center justify-center gap-1.5 text-xs font-semibold text-zinc-200 transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Pay via PhonePe</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* WORKFLOW VIEW 4: UPI LITE (UPI_LITE) */}
+        {/* WORKFLOW VIEW 3: UPI LITE (UPI_LITE) */}
         {/* ======================================================== */}
         {method === 'UPI_LITE' && step === 'IDLE' && (
           <div className="w-full flex flex-col items-center gap-4 py-2">
@@ -586,15 +507,15 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
                   <span>Amount exceeds RBI UPI Lite ₹500 limit</span>
                 </div>
                 <div className="text-[10px] text-amber-300/80">
-                  RBI caps single UPI Lite transactions at ₹500. For higher amounts, please switch to UPI Dynamic QR.
+                  RBI caps single UPI Lite transactions at ₹500. For higher amounts, please switch to another method.
                 </div>
                 {onChangeMethod && (
                   <button
                     type="button"
-                    onClick={() => onChangeMethod('UPI_QR')}
+                    onClick={() => onChangeMethod('CARD_NFC')}
                     className="mt-1 py-1.5 px-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-xs text-center transition-all border border-amber-500/40"
                   >
-                    Switch to UPI Dynamic QR →
+                    Switch to Tap to Pay →
                   </button>
                 )}
               </div>
@@ -615,6 +536,131 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
         )}
 
         {/* ======================================================== */}
+        {/* WORKFLOW VIEW 4: CRYPTO WALLET (CRYPTO_WALLET) */}
+        {/* ======================================================== */}
+        {method === 'CRYPTO_WALLET' && step === 'IDLE' && (
+          <div className="w-full flex flex-col items-center gap-3.5 py-1">
+            
+            {/* Crypto Header Card */}
+            <div className="w-full rounded-2xl bg-gradient-to-br from-violet-950/80 via-zinc-900 to-zinc-950 border border-violet-500/30 p-4 flex flex-col gap-3 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-violet-500/20 text-violet-300 border border-violet-500/40 flex items-center justify-center">
+                    <Wallet className="w-5 h-5 text-violet-400" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-violet-100 flex items-center gap-1.5">
+                      <span>CRYPTO RECEIVE</span>
+                      <span className="text-[8px] bg-violet-500/20 text-violet-300 border border-violet-500/30 px-1 py-0.2 rounded font-mono">
+                        STORE & FORWARD
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-zinc-400 font-mono">Offline-signed, broadcast on sync</div>
+                  </div>
+                </div>
+
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                  isOnline
+                    ? 'text-emerald-400 bg-emerald-950/60 border-emerald-500/30'
+                    : 'text-amber-400 bg-amber-950/60 border-amber-500/30'
+                }`}>
+                  {isOnline ? 'Node Active' : 'Offline Sign'}
+                </span>
+              </div>
+
+              {/* Chain Selector */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wider">SELECT CHAIN</span>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(Object.entries(CHAIN_DISPLAY) as [CryptoChain, typeof CHAIN_DISPLAY[CryptoChain]][]).map(([chain, info]) => (
+                    <button
+                      key={chain}
+                      type="button"
+                      onClick={() => setSelectedChain(chain)}
+                      className={`py-1.5 px-1 rounded-lg text-center transition-all text-[10px] font-semibold border ${
+                        selectedChain === chain
+                          ? 'bg-violet-500/20 border-violet-500/40 text-violet-200'
+                          : 'bg-zinc-950/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                      }`}
+                    >
+                      <span className={selectedChain === chain ? info.color : ''}>{info.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Conversion Rate Display */}
+              <div className="p-2 rounded-lg bg-zinc-950/80 border border-zinc-850 text-[10px] text-zinc-400 font-mono flex items-center justify-between">
+                <span>₹{amount.toFixed(2)} ≈</span>
+                <span className={`font-semibold ${CHAIN_DISPLAY[selectedChain].color}`}>
+                  {(amount * CHAIN_DISPLAY[selectedChain].rate).toFixed(8)} {CHAIN_DISPLAY[selectedChain].symbol}
+                </span>
+              </div>
+            </div>
+
+            {/* Merchant Receiving QR Code */}
+            <div className="w-full flex flex-col items-center gap-2">
+              <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">
+                Merchant Receiving Address
+              </span>
+              <div className="relative p-2 rounded-2xl bg-zinc-950 border border-zinc-800 shadow-inner flex flex-col items-center">
+                <DynamicQrCode
+                  value={MERCHANT_CRYPTO_ADDRESSES[selectedChain]}
+                  size={160}
+                  logo={
+                    <div className="w-6 h-6 rounded bg-violet-500 flex items-center justify-center font-black text-[8px] text-white">
+                      {CHAIN_DISPLAY[selectedChain].symbol.slice(0, 2)}
+                    </div>
+                  }
+                />
+                {/* Scan laser animation overlay */}
+                <div className="absolute inset-x-4 top-2 h-1 bg-violet-400/80 rounded-full shadow-[0_0_12px_rgba(139,92,246,1)] animate-bounce pointer-events-none" />
+              </div>
+
+              {/* Truncated Address */}
+              <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono bg-zinc-950/60 border border-zinc-850 px-2.5 py-1 rounded-lg max-w-full">
+                <Link2 className="w-3 h-3 text-violet-400 shrink-0" />
+                <span className="truncate">{MERCHANT_CRYPTO_ADDRESSES[selectedChain]}</span>
+              </div>
+            </div>
+
+            {/* Simulate Customer Wallet Scan */}
+            <div className="w-full flex flex-col gap-2 pt-2 border-t border-zinc-800">
+              <span className="text-[10px] font-semibold text-zinc-400 text-center uppercase tracking-wider">
+                Simulate Customer Wallet Scan
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSimulateCryptoScan(selectedChain)}
+                  className="py-2.5 px-3 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 active:scale-95 border border-violet-500/30 flex items-center justify-center gap-1.5 text-xs font-semibold text-violet-200 transition-all"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Scan & Sign</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSimulateCryptoScan(selectedChain)}
+                  className="py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-750 active:scale-95 border border-zinc-700 flex items-center justify-center gap-1.5 text-xs font-semibold text-zinc-200 transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>WalletConnect</span>
+                </button>
+              </div>
+
+              {/* Offline notice */}
+              {!isOnline && (
+                <div className="w-full p-2 rounded-xl bg-amber-950/30 border border-amber-500/20 text-[10px] text-amber-300 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Transaction will be signed offline & broadcast when connectivity is restored.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
         {/* INTERMEDIATE STEP: READING CHIP / CONTACTLESS / CRYPTO */}
         {/* ======================================================== */}
         {(step === 'READING' || step === 'AUTHORIZING') && (
@@ -622,17 +668,25 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
             <div className="relative">
               <div className="w-16 h-16 rounded-full border-4 border-emerald-500/20 border-t-emerald-400 animate-spin flex items-center justify-center" />
               <div className="absolute inset-0 flex items-center justify-center">
-                <Lock className="w-6 h-6 text-emerald-400" />
+                {method === 'CRYPTO_WALLET'
+                  ? <Hash className="w-6 h-6 text-violet-400" />
+                  : <Lock className="w-6 h-6 text-emerald-400" />
+                }
               </div>
             </div>
 
             <div>
               <h4 className="text-sm sm:text-base font-bold text-white">
-                {step === 'READING' && 'Reading Secure Element...'}
-                {step === 'AUTHORIZING' && 'Exchanging EMV Cryptogram & Authorizing...'}
+                {step === 'READING' && method === 'CRYPTO_WALLET' && 'Signing Transaction Offline...'}
+                {step === 'READING' && method !== 'CRYPTO_WALLET' && 'Reading Secure Element...'}
+                {step === 'AUTHORIZING' && method === 'CRYPTO_WALLET' && 'Storing Signed Transaction in Dexie...'}
+                {step === 'AUTHORIZING' && method !== 'CRYPTO_WALLET' && 'Exchanging EMV Cryptogram & Authorizing...'}
               </h4>
               <p className="text-xs text-zinc-400 mt-1 font-mono">
-                {method.replace('_', ' ')} • {terminalId}
+                {method === 'CRYPTO_WALLET'
+                  ? `${CHAIN_DISPLAY[selectedChain].label} • ${terminalId}`
+                  : `${method.replace('_', ' ')} • ${terminalId}`
+                }
               </p>
             </div>
           </div>
@@ -770,6 +824,34 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
                   <span className="text-zinc-200">{completedTxn.upiVpa}</span>
                 </div>
               )}
+              {completedTxn?.cryptoChain && (
+                <>
+                  <div className="flex justify-between text-zinc-400">
+                    <span>CHAIN</span>
+                    <span className={`font-semibold ${CHAIN_DISPLAY[completedTxn.cryptoChain].color}`}>
+                      {CHAIN_DISPLAY[completedTxn.cryptoChain].label}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-zinc-400">
+                    <span>AMOUNT</span>
+                    <span className="text-zinc-200">
+                      {completedTxn.cryptoAmountToken} {CHAIN_DISPLAY[completedTxn.cryptoChain].symbol}
+                    </span>
+                  </div>
+                  {completedTxn.cryptoTxHash && (
+                    <div className="flex justify-between text-zinc-400">
+                      <span>TX HASH</span>
+                      <span className="text-violet-300 text-[10px] truncate max-w-[180px]">{completedTxn.cryptoTxHash}</span>
+                    </div>
+                  )}
+                  {completedTxn.cryptoWalletAddress && (
+                    <div className="flex justify-between text-zinc-400">
+                      <span>FROM</span>
+                      <span className="text-zinc-300 text-[10px] truncate max-w-[180px]">{completedTxn.cryptoWalletAddress}</span>
+                    </div>
+                  )}
+                </>
+              )}
               <div className="flex justify-between text-zinc-400">
                 <span>RRN / REF</span>
                 <span className="text-zinc-400 text-[10px]">{completedTxn?.rrn || 'RRN99238481'}</span>
@@ -827,6 +909,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
         )}
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NetworkStatusBadge } from './pos/NetworkStatusBadge';
 import { PosTerminalView } from './pos/PosTerminalView';
+import { OfflinePaymentTracker } from './pos/OfflinePaymentTracker';
 import { posDb, initializePosDb } from '../db/db';
 import { useSyncEngine } from '../hooks/useSyncEngine';
 import type { PosTransactionRecord } from '../types/pos';
@@ -190,6 +191,14 @@ export const MerchantPosContainer: React.FC = () => {
               </button>
             )}
           </div>
+
+          {/* Offline Payment Tracker Pipeline */}
+          <OfflinePaymentTracker
+            transactions={transactions}
+            isSyncing={isSyncing}
+            isOnline={isOnline}
+            onManualSync={syncOfflineBatch}
+          />
 
           {/* Dexie Live Stored Transactions Feed */}
           <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-3.5 sm:p-4 backdrop-blur-md flex flex-col gap-2.5 sm:gap-3">
