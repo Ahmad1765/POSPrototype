@@ -73,6 +73,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const getTerminalStatusBadgeClass = (status: string) => {
+    switch (status.toUpperCase()) {
+      case 'ONLINE':
+        return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+      case 'BUSY':
+        return 'bg-sky-500/10 text-sky-400 border-sky-500/30';
+      case 'OFFLINE':
+        return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+      case 'ERROR':
+      case 'DISCONNECTED':
+        return 'bg-rose-500/10 text-rose-400 border-rose-500/30';
+      default:
+        return 'bg-zinc-800 text-zinc-400 border-zinc-750';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col lg:flex-row font-sans selection:bg-emerald-500 selection:text-black">
       
@@ -182,7 +198,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <TerminalIcon className="w-4 h-4 text-emerald-400" />
                         <span className="font-mono font-bold text-xs sm:text-sm text-zinc-100">{term.name}</span>
                       </div>
-                      <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                      <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${getTerminalStatusBadgeClass(term.status)}`}>
                         {term.status}
                       </span>
                     </div>

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { posDb } from '../../db/db';
 import { adyenTerminalService } from '../../utils/adyenTerminalService';
+import { CURRENCY_SYMBOLS } from '../pos/PosTerminalView';
 import type { SaleToPOIRequest } from '../../types/adyenNexoTypes';
 
 interface TransactionLedgerTableProps {
@@ -15,7 +16,8 @@ interface TransactionLedgerTableProps {
 export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ transactions }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | TransactionState>('ALL');
-  const [reversalStatus, setReversalStatus] = useState<{ id: string; message: string } | null>(null);
+  const [reversingId, setReversingId] = useState<string | null>(null);
+  const [reversalStatus, setReversalStatus] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
 
   const filteredTxns = useMemo(() => {
     return transactions.filter((t) => {
@@ -38,6 +40,9 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
   }, [transactions, statusFilter, searchQuery]);
 
   const handleTriggerReversal = async (txn: PosTransactionRecord) => {
+    if (reversingId) return;
+    setReversingId(txn.id);
+
     try {
       const serviceId = adyenTerminalService.generateServiceId();
       const reversalRequest: SaleToPOIRequest = {
@@ -58,19 +63,46 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
         }
       };
 
-      await adyenTerminalService.sendSaleToPOIRequest(reversalRequest);
+      const response = await adyenTerminalService.sendSaleToPOIRequest(reversalRequest);
+      const reversalResponse = response?.SaleToPOIResponse?.ReversalResponse;
+      const result = reversalResponse?.Response?.Result;
+      const errorCondition = reversalResponse?.Response?.ErrorCondition;
 
-      // Update state in Dexie
-      await posDb.transactions.put({
-        ...txn,
-        state: 'VOIDED',
-        declineReason: 'Reversed via Adyen Nexo 3.0 ReversalRequest'
-      });
+      if (result === 'Success') {
+        // Update state in Dexie only for approved reversal
+        await posDb.transactions.put({
+          ...txn,
+          state: 'VOIDED',
+          declineReason: 'Reversed via Adyen Nexo 3.0 ReversalRequest'
+        });
 
-      setReversalStatus({ id: txn.id, message: `Reversed ${txn.pspReference || txn.id}` });
-      setTimeout(() => setReversalStatus(null), 4000);
-    } catch (err) {
+        setReversalStatus({
+          id: txn.id,
+          message: `Reversal approved for ${txn.pspReference || txn.id}`,
+          isError: false
+        });
+      } else {
+        // Keep existing transaction state and surface feedback
+        const failReason = errorCondition || reversalResponse?.Response?.AdditionalResponse || result || 'Declined by POI';
+        setReversalStatus({
+          id: txn.id,
+          message: `Reversal declined (${failReason}) for ${txn.pspReference || txn.id}`,
+          isError: true
+        });
+      }
+
+      setTimeout(() => setReversalStatus(null), 5000);
+    } catch (err: unknown) {
       console.error('Reversal error:', err);
+      const errMsg = err instanceof Error ? err.message : 'Network / POI communication error';
+      setReversalStatus({
+        id: txn.id,
+        message: `Reversal failed: ${errMsg}`,
+        isError: true
+      });
+      setTimeout(() => setReversalStatus(null), 5000);
+    } finally {
+      setReversingId(null);
     }
   };
 
@@ -131,6 +163,7 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
           </span>
         );
       case 'OFFLINE_PENDING':
+      case 'STORED_OFFLINE':
       case 'QUEUED':
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
@@ -167,9 +200,17 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
       
       {/* Reversal Toast Notification */}
       {reversalStatus && (
-        <div className="p-2.5 bg-zinc-800 border-b border-zinc-700 text-xs text-emerald-400 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>Nexo Reversal Dispatched: {reversalStatus.message}</span>
+        <div className={`p-2.5 border-b text-xs flex items-center gap-2 transition-all ${
+          reversalStatus.isError 
+            ? 'bg-rose-950/60 border-rose-800 text-rose-300' 
+            : 'bg-zinc-800 border-zinc-700 text-emerald-400'
+        }`}>
+          {reversalStatus.isError ? (
+            <XCircle className="w-4 h-4 shrink-0 text-rose-400" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+          )}
+          <span>{reversalStatus.message}</span>
         </div>
       )}
 
@@ -249,18 +290,19 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
                     {getStatusPill(tx.state)}
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold text-zinc-100">
-                    {tx.currency === 'EUR' ? '€' : tx.currency === 'USD' ? '$' : tx.currency === 'GBP' ? '£' : '₹'}{tx.amount.toFixed(2)}
+                    {CURRENCY_SYMBOLS[tx.currency] || tx.currency || '₹'}{tx.amount.toFixed(2)}
                   </td>
                   <td className="py-3 px-4 text-center">
                     {tx.state === 'SETTLED' ? (
                       <button
                         type="button"
+                        disabled={reversingId === tx.id || reversingId !== null}
                         onClick={() => handleTriggerReversal(tx)}
-                        className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-500/40 border border-zinc-700/60 text-zinc-300 text-[10px] font-mono flex items-center gap-1 mx-auto transition-colors cursor-pointer"
+                        className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-500/40 border border-zinc-700/60 text-zinc-300 text-[10px] font-mono flex items-center gap-1 mx-auto transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         title="Dispatch Nexo 3.0 Reversal"
                       >
-                        <RotateCcw className="w-3 h-3" />
-                        <span>Reversal</span>
+                        <RotateCcw className={`w-3 h-3 ${reversingId === tx.id ? 'animate-spin' : ''}`} />
+                        <span>{reversingId === tx.id ? 'Reversing...' : 'Reversal'}</span>
                       </button>
                     ) : (
                       <span className="text-[10px] font-mono text-zinc-600">—</span>
@@ -284,7 +326,7 @@ export const TransactionLedgerTable: React.FC<TransactionLedgerTableProps> = ({ 
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-zinc-400">{getMethodBadge(tx.paymentMethod)}</span>
               <span className="font-bold text-white">
-                {tx.currency === 'EUR' ? '€' : tx.currency === 'USD' ? '$' : tx.currency === 'GBP' ? '£' : '₹'}{tx.amount.toFixed(2)}
+                {CURRENCY_SYMBOLS[tx.currency] || tx.currency || '₹'}{tx.amount.toFixed(2)}
               </span>
             </div>
           </div>

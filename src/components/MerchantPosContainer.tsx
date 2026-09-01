@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NetworkStatusBadge } from './pos/NetworkStatusBadge';
-import { PosTerminalView } from './pos/PosTerminalView';
+import { PosTerminalView, CURRENCY_SYMBOLS } from './pos/PosTerminalView';
 import { OfflinePaymentTracker } from './pos/OfflinePaymentTracker';
 import { AdyenTerminalFrame } from './pos/adyen/AdyenTerminalFrame';
 import { AdyenNexoInspector } from './pos/adyen/AdyenNexoInspector';
@@ -32,7 +32,8 @@ export const MerchantPosContainer: React.FC = () => {
     activeTerminalModel,
     registeredTerminals,
     connectionMode,
-    isOfflineModeAllowed
+    isOfflineModeAllowed,
+    activeCurrency
   } = useAdyenConfigStore();
 
   const currentTerminal = registeredTerminals.find((t) => t.model === activeTerminalModel) || registeredTerminals[0];
@@ -87,11 +88,16 @@ export const MerchantPosContainer: React.FC = () => {
   };
 
   // Metrics
-  const pendingOfflineCount = transactions.filter(t => t.state === 'OFFLINE_PENDING').length;
+  const pendingOfflineCount = transactions.filter(t => t.state === 'OFFLINE_PENDING' || t.state === 'STORED_OFFLINE').length;
   const settledCount = transactions.filter(t => t.state === 'SETTLED').length;
-  const totalShiftVolume = transactions
-    .filter(t => t.state === 'SETTLED' || t.state === 'OFFLINE_PENDING')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const shiftTotalsByCurrency = transactions
+    .filter(t => t.state === 'SETTLED' || t.state === 'OFFLINE_PENDING' || t.state === 'STORED_OFFLINE')
+    .reduce<Record<string, number>>((acc, t) => {
+      const curr = t.currency || activeCurrency || 'INR';
+      acc[curr] = (acc[curr] || 0) + t.amount;
+      return acc;
+    }, {});
+  const shiftTotalEntries = Object.entries(shiftTotalsByCurrency);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
@@ -226,8 +232,10 @@ export const MerchantPosContainer: React.FC = () => {
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               <div className="p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-850">
                 <div className="text-[9px] text-zinc-500 font-medium">Shift Total</div>
-                <div className="text-sm font-mono font-bold text-zinc-100 mt-0.5">
-                  {totalShiftVolume.toFixed(2)}
+                <div className="text-xs font-mono font-bold text-zinc-100 mt-0.5 truncate" title={shiftTotalEntries.map(([c, val]) => `${CURRENCY_SYMBOLS[c] || c}${val.toFixed(2)}`).join(' / ')}>
+                  {shiftTotalEntries.length === 0
+                    ? `${CURRENCY_SYMBOLS[activeCurrency] || activeCurrency || '₹'}0.00`
+                    : shiftTotalEntries.map(([c, val]) => `${CURRENCY_SYMBOLS[c] || c}${val.toFixed(2)}`).join(' • ')}
                 </div>
               </div>
               <div className="p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-850">
@@ -314,7 +322,7 @@ export const MerchantPosContainer: React.FC = () => {
 
                     <div className="text-right shrink-0 pl-2">
                       <div className="text-xs font-mono font-bold text-zinc-100">
-                        {tx.currency === 'EUR' ? '€' : tx.currency === 'USD' ? '$' : tx.currency === 'GBP' ? '£' : '₹'}{tx.amount.toFixed(2)}
+                        {CURRENCY_SYMBOLS[tx.currency] || tx.currency || '₹'}{tx.amount.toFixed(2)}
                       </div>
                       <span className={`text-[8px] font-semibold px-1 py-0.2 rounded font-mono ${
                         tx.state === 'DECLINED'

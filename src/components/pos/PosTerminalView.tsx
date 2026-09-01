@@ -15,7 +15,7 @@ interface PosTerminalViewProps {
   onTransactionPersisted?: (txn: PosTransactionRecord) => void;
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
+export const CURRENCY_SYMBOLS: Record<string, string> = {
   INR: '₹',
   EUR: '€',
   USD: '$',
