@@ -42,6 +42,11 @@ const METHOD_ICON: Record<PaymentMethodType, React.ReactNode> = {
   CARD_CHIP: <CreditCard className="w-3 h-3" />,
   UPI_LITE: <Zap className="w-3 h-3" />,
   CRYPTO_WALLET: <Wallet className="w-3 h-3" />,
+  ADYEN_CARD: <CreditCard className="w-3 h-3" />,
+  ADYEN_NFC: <Radio className="w-3 h-3" />,
+  ADYEN_QR: <Zap className="w-3 h-3" />,
+  ALIPAY: <Wallet className="w-3 h-3" />,
+  WECHAT_PAY: <Wallet className="w-3 h-3" />
 };
 
 const METHOD_LABEL: Record<PaymentMethodType, string> = {
@@ -49,6 +54,11 @@ const METHOD_LABEL: Record<PaymentMethodType, string> = {
   CARD_CHIP: 'Chip',
   UPI_LITE: 'UPI Lite',
   CRYPTO_WALLET: 'Crypto',
+  ADYEN_CARD: 'Adyen Card',
+  ADYEN_NFC: 'Adyen Tap',
+  ADYEN_QR: 'Adyen QR',
+  ALIPAY: 'Alipay',
+  WECHAT_PAY: 'WeChat Pay'
 };
 
 function getStageIndex(state: TransactionState): number {
