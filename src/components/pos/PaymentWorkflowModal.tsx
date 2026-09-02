@@ -66,6 +66,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
   const [soundboxAlert, setSoundboxAlert] = useState<string | null>(null);
   const [completedTxn, setCompletedTxn] = useState<PosTransactionRecord | null>(null);
   const [asyncQrCountdown] = useState<number>(4);
+  const [inFlightMerchantRef, setInFlightMerchantRef] = useState<string | null>(null);
 
   // Crypto state
   const [selectedChain, setSelectedChain] = useState<CryptoChain>('USDT_TRC20');
@@ -80,6 +81,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       setCompletedTxn(null);
       setCardLast4(`${Math.floor(1000 + Math.random() * 9000)}`);
       setCustomerCryptoAddress('');
+      setInFlightMerchantRef(null);
 
       if (method === 'CARD_NFC' || method === 'ADYEN_NFC') {
         setSelectedCardNetwork(activeCurrency === 'INR' ? 'RUPAY' : 'VISA');
@@ -98,12 +100,12 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
     }, 4500);
   };
 
-  // Asynchronous Webhook Subscriber
+  // Asynchronous Webhook Subscriber - Active strictly for the pending in-flight QR session
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || step !== 'WAITING_WEBHOOK' || !inFlightMerchantRef) return;
 
     const unsubscribe = adyenTerminalService.subscribeToAdyenWebhooks((item) => {
-      if (item.eventCode === 'AUTHORISATION') {
+      if (item.eventCode === 'AUTHORISATION' && item.merchantReference === inFlightMerchantRef) {
         const isSuccess = item.success === 'true';
         if (isSuccess) {
           triggerSoundbox(`${currencySymbol}${amount.toFixed(2)} received via ${item.paymentMethod.toUpperCase()} Webhook!`);
@@ -116,7 +118,7 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
     });
 
     return () => unsubscribe();
-  }, [isOpen, amount, currencySymbol]);
+  }, [isOpen, step, inFlightMerchantRef, amount, currencySymbol]);
 
   // Finalize Transaction Routine with Adyen Store-and-Forward (SaF) Interceptor
   const finalizeTransaction = useCallback(async (
@@ -134,8 +136,8 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       const clientUuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `uuid-${Date.now()}`;
       const txnId = `TXN-${Math.floor(10000 + Math.random() * 90000)}`;
       const serviceId = adyenTerminalService.generateServiceId();
-      const pspReference = customPspRef || adyenTerminalService.generatePspReference();
-      const authCode = customAuthCode || `AUTH-${Math.floor(100000 + Math.random() * 900000)}`;
+      let pspReference = customPspRef || adyenTerminalService.generatePspReference();
+      let authCode = customAuthCode || `AUTH-${Math.floor(100000 + Math.random() * 900000)}`;
 
       const isAdyenMethod = method === 'ADYEN_NFC' || method === 'ADYEN_CARD' || method === 'ADYEN_QR' || method === 'CARD_NFC' || method === 'CARD_CHIP';
 
@@ -355,6 +357,45 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
 
         const res = await adyenTerminalService.sendSaleToPOIRequest(saleToPoiReq);
         nexoResponseStr = JSON.stringify(res);
+
+        const paymentResp = res.SaleToPOIResponse?.PaymentResponse;
+        const result = paymentResp?.Response?.Result;
+        const errorCondition = paymentResp?.Response?.ErrorCondition;
+        const additionalResponse = paymentResp?.Response?.AdditionalResponse;
+
+        // Inspect Response.Result and handle terminal / issuer refusals
+        if (result !== 'Success') {
+          const declineMsg = errorCondition || additionalResponse || 'Payment refused by Adyen terminal / issuer';
+          setDeclineReason(declineMsg);
+          setStep('DECLINED');
+
+          const declinedRecord: PosTransactionRecord = {
+            id: txnId,
+            clientUuid,
+            terminalId,
+            merchantId,
+            amount,
+            currency: activeCurrency,
+            paymentMethod: method,
+            cardNetwork: (method === 'CARD_CHIP' || method === 'CARD_NFC' || method === 'ADYEN_CARD' || method === 'ADYEN_NFC') ? (forcedNetwork || selectedCardNetwork) : undefined,
+            cardLast4: (method === 'CARD_CHIP' || method === 'CARD_NFC' || method === 'ADYEN_CARD' || method === 'ADYEN_NFC') ? cardLast4 : undefined,
+            state: 'DECLINED',
+            isOffline: false,
+            declineReason: declineMsg,
+            nexoResponse: nexoResponseStr,
+            createdAt: now
+          };
+          await posDb.transactions.put(declinedRecord);
+          return;
+        }
+
+        // Populate authoritative pspReference and authCode from returned POIData / PaymentResult
+        if (paymentResp?.POIData?.POITransactionID?.TransactionID) {
+          pspReference = paymentResp.POIData.POITransactionID.TransactionID;
+        }
+        if (paymentResp?.PaymentResult?.PaymentAcquirerData?.ApprovalCode) {
+          authCode = paymentResp.PaymentResult.PaymentAcquirerData.ApprovalCode;
+        }
       }
 
       const onlineRecord: PosTransactionRecord = {
@@ -399,9 +440,10 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       }
       onPaymentSuccess(onlineRecord);
 
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to complete transaction:', err);
-      setDeclineReason('Local Database Storage Error');
+      const errorMessage = err instanceof Error ? err.message : 'Terminal API / Network Communication Failure';
+      setDeclineReason(errorMessage);
       setStep('DECLINED');
     }
   }, [activeCurrency, amount, cardLast4, currencySymbol, customerCryptoAddress, customerVpa, isOfflineModeAllowed, isOnline, merchantId, method, onPaymentSuccess, safConfig, selectedCardNetwork, selectedChain, terminalId]);
@@ -436,11 +478,12 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
     setStep('WAITING_WEBHOOK');
     const pspRef = adyenTerminalService.generatePspReference();
     const txnId = `TXN-${Math.floor(10000 + Math.random() * 90000)}`;
+    setInFlightMerchantRef(txnId);
 
     const now = new Date().toISOString();
     const inFlightTxn: PosTransactionRecord = {
       id: txnId,
-      clientUuid: `uuid-${Date.now()}`,
+      clientUuid: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `uuid-${Date.now()}`,
       terminalId,
       merchantId,
       amount,
@@ -461,14 +504,41 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
       paymentMethod: apmName,
       delayMs: 3500,
       shouldSucceed: true
-    }).then((item) => {
-      setCompletedTxn({
-        ...inFlightTxn,
-        state: 'SETTLED',
-        authCode: item.additionalData.authCode,
-        settledAt: new Date().toISOString()
-      });
-      onPaymentSuccess(inFlightTxn);
+    })
+    .then(async (item) => {
+      const isSuccess = item.success === 'true';
+      const settledTimestamp = new Date().toISOString();
+
+      if (isSuccess) {
+        const settledRecord: PosTransactionRecord = {
+          ...inFlightTxn,
+          state: 'SETTLED',
+          authCode: item.additionalData.authCode,
+          syncedAt: settledTimestamp,
+          settledAt: settledTimestamp
+        };
+        await posDb.transactions.put(settledRecord);
+        setCompletedTxn(settledRecord);
+        setInFlightMerchantRef(null);
+        onPaymentSuccess(settledRecord);
+      } else {
+        const declinedRecord: PosTransactionRecord = {
+          ...inFlightTxn,
+          state: 'DECLINED',
+          declineReason: item.reason || 'Asynchronous authorization refused by issuer'
+        };
+        await posDb.transactions.put(declinedRecord);
+        setInFlightMerchantRef(null);
+        setDeclineReason(item.reason || 'Asynchronous authorization refused by issuer');
+        setStep('DECLINED');
+      }
+    })
+    .catch((err: unknown) => {
+      console.error('[AsyncQR] Webhook resolution failed:', err);
+      const errMsg = err instanceof Error ? err.message : 'Asynchronous payment authorization timeout or error';
+      setInFlightMerchantRef(null);
+      setDeclineReason(errMsg);
+      setStep('DECLINED');
     });
   };
 
@@ -533,6 +603,8 @@ export const PaymentWorkflowModal: React.FC<PaymentWorkflowModalProps> = ({
           </div>
 
           <button
+            type="button"
+            aria-label="Close Payment Modal"
             onClick={onClose}
             disabled={step === 'READING' || step === 'AUTHORIZING' || step === 'WAITING_WEBHOOK'}
             className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white transition-colors disabled:opacity-30 cursor-pointer"

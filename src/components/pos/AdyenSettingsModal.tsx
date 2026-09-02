@@ -42,17 +42,26 @@ export const AdyenSettingsModal: React.FC<AdyenSettingsModalProps> = ({ isOpen, 
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl shadow-2xl w-full max-w-2xl text-gray-100 flex flex-col max-h-[90vh]">
+      <div 
+        role="dialog" 
+        aria-modal="true" 
+        aria-labelledby="adyen-settings-modal-title"
+        className="bg-gray-900 border border-gray-800 rounded-xl shadow-2xl w-full max-w-2xl text-gray-100 flex flex-col max-h-[90vh]"
+      >
         
         {/* Header */}
         <div className="bg-black px-6 py-5 border-b border-gray-800 flex justify-between items-center rounded-t-xl">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight text-white">Adyen Terminal Fleet Settings</h2>
+            <h2 id="adyen-settings-modal-title" className="text-xl font-semibold tracking-tight text-white">
+              Adyen Terminal Fleet Settings
+            </h2>
             <p className="text-sm text-gray-400 mt-1">
               Manage cloud routing and offline configurations for <span className="text-gray-200 font-mono text-xs">{merchantAccount}</span>.
             </p>
           </div>
           <button 
+            type="button"
+            aria-label="Close Adyen Settings"
             onClick={onClose}
             className="text-gray-400 hover:text-white transition-colors p-2 cursor-pointer"
           >
