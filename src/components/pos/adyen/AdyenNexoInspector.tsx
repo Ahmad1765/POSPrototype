@@ -23,17 +23,18 @@ export const AdyenNexoInspector: React.FC<AdyenNexoInspectorProps> = ({
 
   useEffect(() => {
     const unsubscribe = adyenTerminalService.subscribeToNexoLogs((newEntry) => {
-      setLogs((prev) => {
-        const updated = [newEntry, ...prev.slice(0, 49)];
-        if (onLogCountChange) onLogCountChange(updated.length);
-        return updated;
-      });
-      // Auto-select latest
+      setLogs((prev) => [newEntry, ...prev.slice(0, 49)]);
       setSelectedLog(newEntry);
     });
 
     return () => unsubscribe();
-  }, [onLogCountChange]);
+  }, []);
+
+  useEffect(() => {
+    if (onLogCountChange) {
+      onLogCountChange(logs.length);
+    }
+  }, [logs.length, onLogCountChange]);
 
   if (!isOpen) return null;
 
@@ -215,7 +216,7 @@ export const AdyenNexoInspector: React.FC<AdyenNexoInspectorProps> = ({
       <div className="p-2.5 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between text-[10px] font-mono text-zinc-500">
         <div className="flex items-center gap-1.5 text-emerald-400">
           <ShieldCheck className="w-3 h-3" />
-          <span>Nexo IS0 20022 / SaleToPOI 3.0 Schema Compliant</span>
+          <span>Nexo ISO 20022 / SaleToPOI 3.0 Schema Compliant</span>
         </div>
         <span>{logs.length} events</span>
       </div>

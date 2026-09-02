@@ -20,7 +20,6 @@ import type {
 } from '../types/adyenNexoTypes';
 import type { PosTransactionRecord } from '../types/pos';
 import { posDb } from '../db/db';
-import { forwardNexoRequestToAdyen } from '../server/adyenCloudProxy';
 import { useAdyenConfigStore } from '../store/adyenConfigStore';
 
 // Type definitions for Nexo Log Events
@@ -318,8 +317,17 @@ class AdyenTerminalService {
 
     try {
       if (config.connectionMode === 'CLOUD_PROXY') {
-        // Route through secure backend proxy (no client-side API keys exposed)
-        response = await forwardNexoRequestToAdyen(request);
+        // Route through secure backend proxy HTTP endpoint (no client-side API keys exposed)
+        const res = await fetch(config.proxyEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request)
+        });
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Proxy Error [HTTP ${res.status}]: ${errorText}`);
+        }
+        response = (await res.json()) as SaleToPOIResponse;
       } else if (config.connectionMode === 'LOCAL_IP') {
         // Direct Local IP / WebSocket terminal connection
         response = await this.dispatchDirectLocalTerminal(request, config.localTerminalIp, config.localTerminalPort);

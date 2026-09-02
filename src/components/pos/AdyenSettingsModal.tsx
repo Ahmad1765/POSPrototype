@@ -138,7 +138,9 @@ export const AdyenSettingsModal: React.FC<AdyenSettingsModalProps> = ({ isOpen, 
                     </span>
                   </div>
                   {lastSafSyncTime && (
-                    <p className="text-xs text-gray-500 mt-1">Last synced: {lastSafSyncTime} • Terminal: {activeTerminalModel}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Last synced: {isNaN(Date.parse(lastSafSyncTime)) ? lastSafSyncTime : new Date(lastSafSyncTime).toLocaleTimeString()} • Terminal: {activeTerminalModel}
+                    </p>
                   )}
                 </div>
               </div>

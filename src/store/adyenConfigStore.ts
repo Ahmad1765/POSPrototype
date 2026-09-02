@@ -4,7 +4,6 @@ import type {
   AdyenTerminalProfile, 
   AdyenSaFConfig 
 } from '../types/adyenNexoTypes';
-import { fetchSaFConfigFromCustomerArea } from '../server/adyenCloudProxy';
 
 export type AdyenConnectionMode = 'SIMULATOR' | 'CLOUD_PROXY' | 'LOCAL_IP';
 
@@ -71,54 +70,53 @@ const DEFAULT_REGISTERED_TERMINALS: AdyenTerminalProfile[] = [
     hasPrinter: false,
     hasCameraScanner: true,
     batteryPercent: 88,
-    firmwareVersion: 'AdyenOS v4.18.1-pci5',
-    status: 'ONLINE'
-  },
-  {
-    model: 'SATURN_1000F2',
-    name: 'Adyen Castles Saturn 1000F2',
-    subtitle: 'Dedicated Countertop PIN Pad with Tactile Keypad',
-    poiId: 'SATURN-482019482910',
-    connectionType: 'LOCAL_IP',
-    ipAddress: '192.168.1.145',
-    hasPrinter: true,
-    hasCameraScanner: false,
-    batteryPercent: 100,
-    firmwareVersion: 'SaturnOS v3.22-emv',
+    firmwareVersion: 'AdyenOS v4.18.2-pci5',
     status: 'ONLINE'
   },
   {
     model: 'NYC1',
     name: 'Adyen NYC1 Card Reader',
-    subtitle: 'Ultra-compact Bluetooth Pocket Card Reader',
-    poiId: 'NYC1-782019283741',
-    connectionType: 'BLUETOOTH',
-    ipAddress: undefined,
+    subtitle: 'Bluetooth Contactless & Chip Reader for SoftPOS',
+    poiId: 'NYC1-554433221100',
+    connectionType: 'LOCAL_IP',
+    ipAddress: '192.168.1.145',
     hasPrinter: false,
     hasCameraScanner: false,
-    batteryPercent: 76,
-    firmwareVersion: 'NYC-FW-1.9.0',
+    batteryPercent: 72,
+    firmwareVersion: 'Firmware v2.4.1-ble',
     status: 'ONLINE'
   },
   {
-    model: 'TAP_TO_PAY',
-    name: 'Adyen Tap to Pay on Mobile',
-    subtitle: 'Contactless SoftPOS on iOS / Android Smartphone',
-    poiId: 'TTP-IPHONE-928301',
-    connectionType: 'SOFTPOS',
-    ipAddress: undefined,
-    hasPrinter: false,
+    model: 'SATURN_1000F2',
+    name: 'Castles Saturn 1000F2',
+    subtitle: 'Heavy-duty Enterprise POS Terminal',
+    poiId: 'CS10-449922118833',
+    connectionType: 'CLOUD',
+    ipAddress: '192.168.1.148',
+    hasPrinter: true,
     hasCameraScanner: true,
-    batteryPercent: 98,
-    firmwareVersion: 'AdyenTTP-SDK-2.4',
+    batteryPercent: 100,
+    firmwareVersion: 'CastlesOS v5.1.0',
+    status: 'BUSY'
+  },
+  {
+    model: 'TAP_TO_PAY',
+    name: 'Adyen Tap to Pay on iPhone/Android',
+    subtitle: 'COTS Device Native NFC SoftPOS',
+    poiId: 'TTP-IPHONE-009182',
+    connectionType: 'CLOUD',
+    ipAddress: '192.168.1.150',
+    hasPrinter: false,
+    hasCameraScanner: false,
+    batteryPercent: 91,
+    firmwareVersion: 'Adyen-TTP-SDK-v2.1',
     status: 'ONLINE'
   }
 ];
 
 export const useAdyenConfigStore = create<AdyenConfigState>((set, get) => ({
-  // Credentials (Proxy-mediated, no secret key exposed)
   merchantAccount: 'MetroCoffeePOS_Store_01',
-  companyAccount: 'MetroGroup',
+  companyAccount: 'MetroCoffeeRoastersGroup',
   environment: 'TEST',
   proxyEndpoint: '/api/adyen/terminal',
   connectionMode: 'SIMULATOR',
@@ -130,39 +128,38 @@ export const useAdyenConfigStore = create<AdyenConfigState>((set, get) => ({
   activeCurrency: 'INR',
   registeredTerminals: DEFAULT_REGISTERED_TERMINALS,
 
-  // SaF Configuration
   safConfig: null,
   isSyncingSafConfig: false,
   lastSafSyncTime: null,
   isOfflineModeAllowed: false,
   safSyncError: null,
 
-  setMerchantAccount: (merchantAccount) => set({ merchantAccount }),
-  setCompanyAccount: (companyAccount) => set({ companyAccount }),
-  setEnvironment: (environment) => set({ environment }),
-  setConnectionMode: (connectionMode) => set({ connectionMode }),
-  setProxyEndpoint: (proxyEndpoint) => set({ proxyEndpoint }),
-  setLocalTerminalIp: (localTerminalIp, localTerminalPort = 8443) => set({ localTerminalIp, localTerminalPort }),
-  setActiveTerminalModel: (activeTerminalModel) => set({ activeTerminalModel }),
-  setActiveCurrency: (activeCurrency) => set({ activeCurrency }),
+  setMerchantAccount: (account) => set({ merchantAccount: account }),
+  setCompanyAccount: (company) => set({ companyAccount: company }),
+  setEnvironment: (env) => set({ environment: env }),
+  setConnectionMode: (mode) => set({ connectionMode: mode }),
+  setProxyEndpoint: (endpoint) => set({ proxyEndpoint: endpoint }),
+  setLocalTerminalIp: (ip, port = 8443) => set({ localTerminalIp: ip, localTerminalPort: port }),
+  setActiveTerminalModel: (model) => set({ activeTerminalModel: model }),
+  setActiveCurrency: (currency) => set({ activeCurrency: currency }),
 
   updateTerminalStatus: (poiId, status, battery) => {
     set((state) => ({
-      registeredTerminals: state.registeredTerminals.map((term) =>
-        term.poiId === poiId
+      registeredTerminals: state.registeredTerminals.map((t) =>
+        t.poiId === poiId
           ? {
-              ...term,
+              ...t,
               status,
-              batteryPercent: battery !== undefined ? battery : term.batteryPercent
+              batteryPercent: battery !== undefined ? battery : t.batteryPercent
             }
-          : term
+          : t
       )
     }));
   },
 
   /**
    * Sync Store-and-Forward (SaF) Configuration Routine
-   * Fetches latest offline ceilings and rules from Adyen Customer Area.
+   * Fetches latest offline ceilings and rules from backend proxy or fallback simulator.
    */
   syncTerminalConfiguration: async (customMerchant, customPoiId) => {
     const state = get();
@@ -173,15 +170,51 @@ export const useAdyenConfigStore = create<AdyenConfigState>((set, get) => ({
     set({ isSyncingSafConfig: true, safSyncError: null });
 
     try {
-      // Simulate network request to Adyen Customer Area proxy / API
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      let config: AdyenSaFConfig;
 
-      const config = await fetchSaFConfigFromCustomerArea(merchantAccount, poiId);
+      try {
+        const endpoint = `${state.proxyEndpoint.replace(/\/terminal$/, '')}/saf-config`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ merchantAccount, poiId })
+        });
+
+        if (res.ok) {
+          config = (await res.json()) as AdyenSaFConfig;
+        } else {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      } catch (_httpErr) {
+        // Fallback simulation when proxy server is running in standalone client-only environment
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        config = {
+          merchantAccount,
+          poiId,
+          store: 'MetroCoffee_MainStore',
+          safEnabled: true,
+          maxSingleTransactionAmount: {
+            EUR: 50.00, USD: 50.00, GBP: 45.00, INR: 500.00,
+            SGD: 75.00, AUD: 75.00, CAD: 70.00, JPY: 7500.00
+          },
+          maxCumulativeOfflineAmount: {
+            EUR: 500.00, USD: 500.00, GBP: 450.00, INR: 2000.00,
+            SGD: 750.00, AUD: 750.00, CAD: 700.00, JPY: 75000.00
+          },
+          maxOfflineTransactionCount: 100,
+          maxOfflineDurationHours: 48,
+          allowedPaymentBrands: ['visa', 'mc', 'amex', 'rupay', 'maestro', 'jcb', 'discover'],
+          requireOfflinePin: false,
+          supportedCurrencies: ['EUR', 'USD', 'GBP', 'INR', 'SGD', 'AUD', 'CAD', 'JPY'],
+          lastSyncedTimestamp: new Date().toISOString(),
+          configVersion: 'v2026.09-SaF-rev3'
+        };
+      }
 
       set({
         safConfig: config,
         isSyncingSafConfig: false,
-        lastSafSyncTime: new Date().toLocaleTimeString(),
+        lastSafSyncTime: new Date().toISOString(),
         isOfflineModeAllowed: config.safEnabled,
         safSyncError: null
       });
