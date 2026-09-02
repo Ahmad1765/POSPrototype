@@ -354,8 +354,13 @@ class AdyenTerminalService {
         response = await this.simulateAdyenTerminalNexoResponse(request);
       }
     } catch (err: unknown) {
-      console.warn('[AdyenTerminalService] Network dispatch failed. Falling back to High-Fidelity Simulator:', err);
-      response = await this.simulateAdyenTerminalNexoResponse(request);
+      if (config.connectionMode === 'SIMULATOR') {
+        console.warn('[AdyenTerminalService] Simulator dispatch error. Re-running simulator:', err);
+        response = await this.simulateAdyenTerminalNexoResponse(request);
+      } else {
+        console.error(`[AdyenTerminalService] ${config.connectionMode} dispatch failed:`, err);
+        throw err;
+      }
     }
 
     const latencyMs = Math.round(performance.now() - startTime);
