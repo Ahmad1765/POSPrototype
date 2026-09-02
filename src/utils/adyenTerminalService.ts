@@ -91,7 +91,7 @@ class AdyenTerminalService {
    */
   public generatePspReference(): string {
     const timestamp = Date.now().toString().slice(-8);
-    const randomHex = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const randomHex = Math.random().toString(36).substring(2, 10).padEnd(8, '0').toUpperCase();
     return `${timestamp}${randomHex}`;
   }
 
