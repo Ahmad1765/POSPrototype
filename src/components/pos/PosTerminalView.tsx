@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PosKeypad } from './PosKeypad';
 import { PaymentMethodSelector } from './PaymentMethodSelector';
 import { PaymentWorkflowModal } from './PaymentWorkflowModal';
@@ -44,6 +44,12 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
   const totalAmount = numericBaseAmount + tipAmount;
   const currencySymbol = CURRENCY_SYMBOLS[activeCurrency] || '₹';
 
+  // Store latest onTransactionPersisted in a ref to stabilize callback
+  const onTransactionPersistedRef = useRef(onTransactionPersisted);
+  useEffect(() => {
+    onTransactionPersistedRef.current = onTransactionPersisted;
+  }, [onTransactionPersisted]);
+
   // State Recovery & Idempotency Loop on Mount
   const runStateRecovery = useCallback(async () => {
     try {
@@ -56,17 +62,23 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
           setTimeout(() => setRecoveryToast(null), 6000);
         }
       });
-      if (reconciled.length > 0 && onTransactionPersisted) {
-        onTransactionPersisted(reconciled[0]);
+      if (reconciled.length > 0 && onTransactionPersistedRef.current) {
+        onTransactionPersistedRef.current(reconciled[0]);
       }
     } catch (err) {
       console.error('[PosTerminalView] Error running state recovery:', err);
     }
-  }, [onTransactionPersisted]);
+  }, []);
 
+  const recoveryCallbackRef = useRef(runStateRecovery);
   useEffect(() => {
-    runStateRecovery();
+    recoveryCallbackRef.current = runStateRecovery;
   }, [runStateRecovery]);
+
+  // Execute recovery strictly once on mount
+  useEffect(() => {
+    recoveryCallbackRef.current();
+  }, []);
 
   // Keypad Handlers
   const handleDigitPress = (digit: string) => {
@@ -275,8 +287,16 @@ export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
             )}
             <div className="min-w-0">
               <div className="font-semibold text-zinc-100 flex items-center gap-1.5">
-                <span>{currencySymbol}{lastTxn.amount.toFixed(2)}</span>
-                <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded uppercase bg-emerald-500/20 text-emerald-300">
+                <span>{(lastTxn.currency && CURRENCY_SYMBOLS[lastTxn.currency]) || lastTxn.currency || '₹'}{lastTxn.amount.toFixed(2)}</span>
+                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded uppercase ${
+                  lastTxn.state === 'DECLINED' || lastTxn.state === 'SYNC_FAILED'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : lastTxn.state === 'OFFLINE_PENDING' || lastTxn.state === 'STORED_OFFLINE' || lastTxn.state === 'QUEUED'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : lastTxn.state === 'VOIDED'
+                    ? 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                }`}>
                   {lastTxn.state.replace('_', ' ')}
                 </span>
               </div>

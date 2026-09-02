@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   X, Activity, CheckCircle2, RefreshCw,
   ShieldCheck, Printer, CreditCard,
-  Clock
+  Clock, AlertTriangle
 } from 'lucide-react';
 import { adyenTerminalService } from '../../../utils/adyenTerminalService';
 import { useAdyenConfigStore } from '../../../store/adyenConfigStore';
@@ -24,6 +24,7 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
   const [diagResult, setDiagResult] = useState<NexoDiagnosisResponse['POIStatus'] | null>(null);
   const [hosts, setHosts] = useState<NexoDiagnosisResponse['HostStatus']>([]);
   const [latency, setLatency] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -31,6 +32,7 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
     setIsRunning(true);
     setDiagResult(null);
     setHosts([]);
+    setErrorMessage(null);
     const startTime = performance.now();
 
     try {
@@ -45,27 +47,47 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
       };
 
       const response = await adyenTerminalService.sendSaleToPOIRequest(request);
+      if (!response?.SaleToPOIResponse) {
+        throw new Error('Malformed diagnosis response: missing SaleToPOIResponse');
+      }
+
       const diag = response.SaleToPOIResponse.DiagnosisResponse;
+      if (!diag || diag.Response?.Result !== 'Success') {
+        const detail = diag?.Response?.ErrorCondition || diag?.Response?.AdditionalResponse || 'Diagnostic execution refused by POI';
+        throw new Error(detail);
+      }
 
       const elapsed = Math.round(performance.now() - startTime);
       setLatency(elapsed);
 
-      if (diag?.POIStatus) {
+      if (diag.POIStatus) {
         setDiagResult(diag.POIStatus);
       }
-      if (diag?.HostStatus) {
+      if (diag.HostStatus) {
         setHosts(diag.HostStatus);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Diagnostic error:', err);
+      const msg = err instanceof Error ? err.message : 'Diagnostic execution failed';
+      setErrorMessage(msg);
+      setDiagResult(null);
     } finally {
       setIsRunning(false);
     }
   };
 
+  const isPedSecure = diagResult?.SecurityStatus === 'NoTamper';
+  const isReaderOk = Boolean(diagResult?.CardReaderOKFlag);
+  const isPrinterOk = diagResult?.PrinterStatus === 'OK';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-zinc-900 w-full max-w-lg rounded-2xl sm:rounded-3xl border border-zinc-800 shadow-2xl flex flex-col overflow-hidden">
+      <div 
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="adyen-diagnostics-modal-title"
+        className="bg-zinc-900 w-full max-w-lg rounded-2xl sm:rounded-3xl border border-zinc-800 shadow-2xl flex flex-col overflow-hidden"
+      >
         
         {/* Header */}
         <div className="p-4 sm:p-5 bg-zinc-950/80 border-b border-zinc-800/80 flex items-center justify-between">
@@ -74,7 +96,7 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
               <Activity className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+              <h3 id="adyen-diagnostics-modal-title" className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                 <span>Adyen Hardware Diagnostics</span>
                 <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
                   PED 5.x
@@ -86,6 +108,8 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close Diagnostics Modal"
             onClick={onClose}
             className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
           >
@@ -113,6 +137,14 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
             </button>
           </div>
 
+          {/* User-Visible Diagnostic Error Banner */}
+          {errorMessage && (
+            <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 flex items-center gap-2.5 animate-fade-in">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <div className="text-xs font-mono">{errorMessage}</div>
+            </div>
+          )}
+
           {/* Results Grid */}
           {diagResult ? (
             <div className="space-y-3 animate-fade-in">
@@ -120,12 +152,16 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
                 
                 {/* PED Tamper Status */}
                 <div className="p-3 rounded-xl bg-zinc-950/80 border border-zinc-800 flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <div className={`w-7 h-7 rounded-lg border flex items-center justify-center ${
+                    isPedSecure
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
                     <ShieldCheck className="w-4 h-4" />
                   </div>
                   <div>
                     <span className="text-[9px] text-zinc-500 font-mono block">PED SECURITY</span>
-                    <span className="font-bold text-emerald-400 font-mono">
+                    <span className={`font-bold font-mono ${isPedSecure ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {diagResult.SecurityStatus === 'NoTamper' ? 'SECURE (No Tamper)' : 'TAMPER DETECTED'}
                     </span>
                   </div>
@@ -133,12 +169,16 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
 
                 {/* Card Reader Flag */}
                 <div className="p-3 rounded-xl bg-zinc-950/80 border border-zinc-800 flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <div className={`w-7 h-7 rounded-lg border flex items-center justify-center ${
+                    isReaderOk
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
                     <CreditCard className="w-4 h-4" />
                   </div>
                   <div>
                     <span className="text-[9px] text-zinc-500 font-mono block">EMV / NFC READER</span>
-                    <span className="font-bold text-emerald-400 font-mono">
+                    <span className={`font-bold font-mono ${isReaderOk ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {diagResult.CardReaderOKFlag ? 'OPERATIONAL' : 'FAULT'}
                     </span>
                   </div>
@@ -146,12 +186,16 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
 
                 {/* Thermal Printer */}
                 <div className="p-3 rounded-xl bg-zinc-950/80 border border-zinc-800 flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <div className={`w-7 h-7 rounded-lg border flex items-center justify-center ${
+                    isPrinterOk
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
                     <Printer className="w-4 h-4" />
                   </div>
                   <div>
                     <span className="text-[9px] text-zinc-500 font-mono block">THERMAL PRINTER</span>
-                    <span className="font-bold text-emerald-400 font-mono">
+                    <span className={`font-bold font-mono ${isPrinterOk ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {diagResult.PrinterStatus === 'OK' ? 'READY (Paper Full)' : diagResult.PrinterStatus}
                     </span>
                   </div>
@@ -190,7 +234,7 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          ) : !errorMessage ? (
             <div className="p-8 rounded-xl bg-zinc-950/40 border border-dashed border-zinc-800 text-center space-y-2">
               <Activity className="w-7 h-7 text-zinc-600 mx-auto" />
               <div className="text-xs font-semibold text-zinc-400">Ready to execute hardware diagnosis</div>
@@ -198,7 +242,7 @@ export const AdyenDiagnosticsModal: React.FC<AdyenDiagnosticsModalProps> = ({
                 Click &quot;Run Nexo Diagnosis&quot; above to perform ISO 20022 PED integrity, NFC antenna, and Cloud host latency checks.
               </p>
             </div>
-          )}
+          ) : null}
 
         </div>
 

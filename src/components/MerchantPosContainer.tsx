@@ -76,9 +76,9 @@ export const MerchantPosContainer: React.FC = () => {
     setup();
   }, [loadTransactionsFromDb]);
 
-  const handleTransactionPersisted = async () => {
+  const handleTransactionPersisted = useCallback(async () => {
     await loadTransactionsFromDb();
-  };
+  }, [loadTransactionsFromDb]);
 
   const handleClearDb = async () => {
     if (confirm('Clear all local transactions from Dexie IndexedDB?')) {
