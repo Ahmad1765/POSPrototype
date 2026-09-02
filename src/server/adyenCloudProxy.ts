@@ -28,12 +28,12 @@ export interface ProxyServerConfig {
   timeoutMs?: number;
 }
 
-// Default fallback server configuration (loaded from process.env if available)
+// Server configuration loaded strictly from process.env without insecure hardcoded fallbacks
 export const getAdyenServerConfig = (): ProxyServerConfig => {
   const globalObj = typeof globalThis !== 'undefined' ? (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }) : {};
   const env = globalObj.process?.env || {};
   return {
-    apiKey: env.ADYEN_API_KEY || 'AQEyhmfxLIjMaBRL96...[SECURE_BACKEND_KEY]...',
+    apiKey: env.ADYEN_API_KEY || '',
     merchantAccount: env.ADYEN_MERCHANT_ACCOUNT || 'MetroCoffeePOS_Store_01',
     environment: (env.ADYEN_ENVIRONMENT as ProxyServerConfig['environment']) || 'TEST',
     liveEndpointPrefix: env.ADYEN_LIVE_ENDPOINT_PREFIX || 'company-live',
@@ -60,14 +60,12 @@ export async function forwardNexoRequestToAdyen(
   overrideConfig?: Partial<ProxyServerConfig>
 ): Promise<SaleToPOIResponse> {
   const config = { ...getAdyenServerConfig(), ...overrideConfig };
-  const endpoint = getAdyenTerminalEndpoint(config);
-
-  if (!config.apiKey || config.apiKey.includes('[SECURE_BACKEND_KEY]')) {
-    // If backend is running in prototype/sandbox mode without production credentials,
-    // fallback gracefully or simulate proxy response
-    console.warn('[AdyenCloudProxy] Secure API Key is not configured on server. Operating in simulated proxy pass-through.');
+  
+  if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.includes('[SECURE_BACKEND_KEY]')) {
+    throw new Error('ADYEN_API_KEY is not configured on the proxy server.');
   }
 
+  const endpoint = getAdyenTerminalEndpoint(config);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs || 65000);
 
@@ -88,7 +86,8 @@ export async function forwardNexoRequestToAdyen(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Adyen Cloud API Error [HTTP ${response.status}]: ${errorText}`);
+      console.error(`[AdyenCloudProxy] Upstream Adyen Cloud API Error [HTTP ${response.status}]:`, errorText);
+      throw new Error(`Adyen Cloud API Error [HTTP ${response.status}]`);
     }
 
     const nexoResponse = (await response.json()) as SaleToPOIResponse;
@@ -146,6 +145,27 @@ export async function fetchSaFConfigFromCustomerArea(
 }
 
 /**
+ * Helper to validate caller authentication credentials from incoming HTTP headers.
+ */
+function authenticateCaller(headers: Record<string, string | string[] | undefined>): boolean {
+  const globalObj = typeof globalThis !== 'undefined' ? (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }) : {};
+  const env = globalObj.process?.env || {};
+  const requiredServiceSecret = env.POS_SERVICE_SECRET || env.ADYEN_PROXY_AUTH_TOKEN;
+
+  // If a shared service secret is configured in the environment, require it
+  if (requiredServiceSecret) {
+    const rawAuth = headers['authorization'] || headers['x-pos-service-key'] || headers['x-pos-session'];
+    const authHeader = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
+    const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
+    return token === requiredServiceSecret;
+  }
+
+  // In default local environment, require at least the presence of a valid POS session or authorization header
+  const auth = headers['authorization'] || headers['x-pos-session'] || headers['x-pos-service-key'];
+  return auth !== undefined && auth !== '';
+}
+
+/**
  * Universal Server Handler (Express / Next.js / Node HTTP compatible)
  */
 export async function handleAdyenProxyRequest(req: {
@@ -161,6 +181,15 @@ export async function handleAdyenProxyRequest(req: {
       status: 405,
       headers: jsonHeaders,
       body: JSON.stringify({ error: 'Method Not Allowed' })
+    };
+  }
+
+  // Authenticate incoming headers before dispatching
+  if (!authenticateCaller(req.headers)) {
+    return {
+      status: 401,
+      headers: jsonHeaders,
+      body: JSON.stringify({ error: 'Unauthorized: Missing or invalid POS service credentials' })
     };
   }
 
@@ -198,11 +227,11 @@ export async function handleAdyenProxyRequest(req: {
       body: JSON.stringify(nexoResponse)
     };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal Server Error';
+    console.error('[AdyenCloudProxy] Internal proxy error:', err);
     return {
       status: 500,
       headers: jsonHeaders,
-      body: JSON.stringify({ error: message })
+      body: JSON.stringify({ error: 'Internal Server Error' })
     };
   }
 }

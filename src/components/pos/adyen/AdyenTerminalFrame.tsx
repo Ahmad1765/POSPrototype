@@ -72,7 +72,7 @@ export const AdyenTerminalFrame: React.FC<AdyenTerminalFrameProps> = ({
                 {t.model === 'SATURN_1000F2' && <CreditCard className="w-3 h-3" />}
                 {t.model === 'NYC1' && <Radio className="w-3 h-3" />}
                 {t.model === 'TAP_TO_PAY' && <Zap className="w-3 h-3" />}
-                <span>{t.model.replace('_', ' ')}</span>
+                <span>{t.model.replace(/_/g, ' ')}</span>
               </button>
             );
           })}
