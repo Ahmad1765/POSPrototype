@@ -1,3 +1,11 @@
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  INR: '₹',
+  EUR: '€',
+  USD: '$',
+  GBP: '£',
+  SGD: 'S$'
+};
+
 /**
  * Formats a number into Indian Rupee format (Lakhs & Crores)
  * e.g., 148750.5 -> "₹ 1,48,750.50"

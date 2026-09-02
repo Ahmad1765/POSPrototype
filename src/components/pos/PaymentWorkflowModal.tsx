@@ -21,13 +21,7 @@ const CHAIN_DISPLAY: Record<CryptoChain, { label: string; symbol: string; color:
   SOL: { label: 'Solana', symbol: 'SOL', color: 'text-violet-400', rate: 0.000085 }
 };
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  INR: '₹',
-  EUR: '€',
-  USD: '$',
-  GBP: '£',
-  SGD: 'S$'
-};
+import { CURRENCY_SYMBOLS } from '../../utils/currency';
 
 interface PaymentWorkflowModalProps {
   isOpen: boolean;

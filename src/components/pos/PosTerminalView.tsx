@@ -15,13 +15,8 @@ interface PosTerminalViewProps {
   onTransactionPersisted?: (txn: PosTransactionRecord) => void;
 }
 
-export const CURRENCY_SYMBOLS: Record<string, string> = {
-  INR: '₹',
-  EUR: '€',
-  USD: '$',
-  GBP: '£',
-  SGD: 'S$'
-};
+import { CURRENCY_SYMBOLS } from '../../utils/currency';
+export { CURRENCY_SYMBOLS };
 
 export const PosTerminalView: React.FC<PosTerminalViewProps> = ({
   isOnline = true,
