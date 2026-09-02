@@ -54,6 +54,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, 1500);
   };
 
+  const escapeCsv = (val?: string | null): string => {
+    if (val === undefined || val === null) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
   const handleExportCsv = () => {
     if (transactions.length === 0) {
       alert('No transactions to export.');
@@ -61,7 +67,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     const headers = 'ID,PSP Ref,Amount,Currency,Payment Method,State,Is Offline,Created At,Auth Code\n';
     const rows = transactions.map(t => 
-      `"${t.id}","${t.pspReference || ''}",${t.amount},"${t.currency}","${t.paymentMethod}","${t.state}",${t.isOffline},"${t.createdAt}","${t.authCode || ''}"`
+      `${escapeCsv(t.id)},${escapeCsv(t.pspReference)},${t.amount},${escapeCsv(t.currency)},${escapeCsv(t.paymentMethod)},${escapeCsv(t.state)},${t.isOffline},${escapeCsv(t.createdAt)},${escapeCsv(t.authCode)}`
     ).join('\n');
     
     const blob = new Blob([headers + rows], { type: 'text/csv' });
