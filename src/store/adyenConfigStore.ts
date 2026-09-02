@@ -172,7 +172,7 @@ export const useAdyenConfigStore = create<AdyenConfigState>((set, get) => ({
     try {
       let config: AdyenSaFConfig;
 
-      try {
+      if (state.connectionMode === 'CLOUD_PROXY') {
         const endpoint = `${state.proxyEndpoint.replace(/\/terminal$/, '')}/saf-config`;
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -180,14 +180,15 @@ export const useAdyenConfigStore = create<AdyenConfigState>((set, get) => ({
           body: JSON.stringify({ merchantAccount, poiId })
         });
 
-        if (res.ok) {
-          config = (await res.json()) as AdyenSaFConfig;
-        } else {
-          throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Proxy SaF Sync Error [HTTP ${res.status}]: ${errText}`);
         }
-      } catch (_httpErr) {
-        // Fallback simulation when proxy server is running in standalone client-only environment
-        await new Promise((resolve) => setTimeout(resolve, 800));
+
+        config = (await res.json()) as AdyenSaFConfig;
+      } else {
+        // High-Fidelity Simulator with natural latency
+        await new Promise((resolve) => setTimeout(resolve, 600));
         config = {
           merchantAccount,
           poiId,
