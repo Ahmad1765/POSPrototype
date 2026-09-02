@@ -27,63 +27,135 @@ export interface NexoLogEntry {
   id: string;
   timestamp: string;
   category: string;
-  direction: 'REQUEST' | 'RESPONSE';
+  direction: 'REQUEST' | 'RESPONSE' | 'NOTIFICATION';
   serviceId: string;
-  payload: SaleToPOIRequest | SaleToPOIResponse;
+  payload: unknown;
   status?: string;
   latencyMs?: number;
 }
 
-type NexoLogListener = (log: NexoLogEntry) => void;
-type WebhookListener = (item: AdyenNotificationRequestItem) => void;
+// ==============================================================================
+// Cryptographic Helper: FIPS 180-4 SHA-256 & RFC 2104 HMAC-SHA256 Implementation
+// ==============================================================================
+
+function sha256Bytes(ascii: string): Uint8Array {
+  const lengthProperty = 'length';
+  let i: number, j: number;
+  const words: number[] = [];
+  const asciiBitLength = ascii[lengthProperty] * 8;
+
+  let hash = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+
+  const k = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  for (i = 0; i < ascii[lengthProperty]; i++) {
+    j = ascii.charCodeAt(i);
+    words[i >> 2] |= j << (((3 - i) % 4) * 8);
+  }
+
+  words[asciiBitLength >> 5] |= 0x80 << (24 - (asciiBitLength % 32));
+  words[(((asciiBitLength + 64) >> 9) << 4) + 15] = asciiBitLength;
+
+  for (i = 0; i < words[lengthProperty]; i += 16) {
+    const w = words.slice(i, i + 16);
+    const oldHash = hash.slice(0);
+
+    for (j = 0; j < 64; j++) {
+      if (j >= 16) {
+        const gamma0 = ((w[j - 15] >>> 7) | (w[j - 15] << 25)) ^
+                       ((w[j - 15] >>> 18) | (w[j - 15] << 14)) ^
+                       (w[j - 15] >>> 3);
+        const gamma1 = ((w[j - 2] >>> 17) | (w[j - 2] << 15)) ^
+                       ((w[j - 2] >>> 19) | (w[j - 2] << 13)) ^
+                       (w[j - 2] >>> 10);
+        w[j] = (w[j - 16] + gamma0 + w[j - 7] + gamma1) | 0;
+      }
+
+      const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
+      const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
+      const sigma0 = ((hash[0] >>> 2) | (hash[0] << 30)) ^
+                     ((hash[0] >>> 13) | (hash[0] << 19)) ^
+                     ((hash[0] >>> 22) | (hash[0] << 10));
+      const sigma1 = ((hash[4] >>> 6) | (hash[4] << 26)) ^
+                     ((hash[4] >>> 11) | (hash[4] << 21)) ^
+                     ((hash[4] >>> 25) | (hash[4] << 7));
+
+      const temp1 = (hash[7] + sigma1 + ch + k[j] + w[j]) | 0;
+      const temp2 = (sigma0 + maj) | 0;
+
+      hash = [(temp1 + temp2) | 0, hash[0], hash[1], hash[2], (hash[3] + temp1) | 0, hash[4], hash[5], hash[6]];
+    }
+
+    for (j = 0; j < 8; j++) {
+      hash[j] = (hash[j] + oldHash[j]) | 0;
+    }
+  }
+
+  const out = new Uint8Array(32);
+  for (i = 0; i < 8; i++) {
+    out[i * 4] = (hash[i] >>> 24) & 0xff;
+    out[i * 4 + 1] = (hash[i] >>> 16) & 0xff;
+    out[i * 4 + 2] = (hash[i] >>> 8) & 0xff;
+    out[i * 4 + 3] = hash[i] & 0xff;
+  }
+  return out;
+}
+
+export function computeHmacSha256(message: string, key: string = 'ADYEN_SAF_HMAC_MASTER_KEY_2026'): string {
+  const blockSize = 64;
+  let keyBytes: Uint8Array;
+
+  if (key.length > blockSize) {
+    keyBytes = sha256Bytes(key);
+  } else {
+    keyBytes = new Uint8Array(blockSize);
+    for (let i = 0; i < key.length; i++) {
+      keyBytes[i] = key.charCodeAt(i);
+    }
+  }
+
+  const oKeyPad = new Uint8Array(blockSize);
+  const iKeyPad = new Uint8Array(blockSize);
+
+  for (let i = 0; i < blockSize; i++) {
+    oKeyPad[i] = (keyBytes[i] || 0) ^ 0x5c;
+    iKeyPad[i] = (keyBytes[i] || 0) ^ 0x36;
+  }
+
+  const innerMsg = String.fromCharCode(...iKeyPad) + message;
+  const innerHash = sha256Bytes(innerMsg);
+  const outerMsg = String.fromCharCode(...oKeyPad) + String.fromCharCode(...innerHash);
+  const outerHash = sha256Bytes(outerMsg);
+
+  return Array.from(outerHash).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
 
 class AdyenTerminalService {
-  private logListeners: Set<NexoLogListener> = new Set();
-  private webhookListeners: Set<WebhookListener> = new Set();
+  private logListeners: ((log: NexoLogEntry) => void)[] = [];
+  private webhookListeners: ((notification: AdyenNotificationRequestItem) => void)[] = [];
   private isRecoveryRunning = false;
 
-  // --- Nexo Logging Event Bus ---
-  public subscribeToNexoLogs(listener: NexoLogListener): () => void {
-    this.logListeners.add(listener);
-    return () => this.logListeners.delete(listener);
-  }
-
-  private broadcastLog(entry: NexoLogEntry): void {
-    this.logListeners.forEach((listener) => {
-      try {
-        listener(entry);
-      } catch (err) {
-        console.error('[AdyenTerminalService] Error in log listener:', err);
-      }
-    });
-  }
-
-  // --- Asynchronous Webhook Event Bus ---
-  public subscribeToAdyenWebhooks(listener: WebhookListener): () => void {
-    this.webhookListeners.add(listener);
-    return () => this.webhookListeners.delete(listener);
-  }
-
-  public dispatchWebhookNotification(item: AdyenNotificationRequestItem): void {
-    this.webhookListeners.forEach((listener) => {
-      try {
-        listener(item);
-      } catch (err) {
-        console.error('[AdyenTerminalService] Error in webhook listener:', err);
-      }
-    });
-  }
+  // ============================================================================
+  // PROTOCOL UTILITIES & BUILDERS
+  // ============================================================================
 
   /**
-   * Helper: Generates unique Nexo alphanumeric ServiceID (1-10 chars)
+   * Helper: Generates unique 1-10 character alphanumeric Nexo ServiceID
    */
   public generateServiceId(): string {
-    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
+    return Math.random().toString(36).substring(2, 12).toUpperCase();
   }
 
   /**
@@ -115,14 +187,52 @@ class AdyenTerminalService {
     };
   }
 
-  // ============================================================================
-  // 1. STATE RECOVERY & IDEMPOTENCY LOOP (Resilience)
-  // ============================================================================
-  
   /**
-   * Checks IndexedDB for any unconfirmed or in-flight transactions (e.g. from a browser crash,
-   * page refresh, or network timeout during a live terminal session) and fires a Nexo
-   * TransactionStatusRequest to reconcile with Adyen.
+   * Helper: Parses Adyen form-encoded or JSON AdditionalResponse field
+   */
+  public parseAdditionalResponse(additionalResponseStr?: string): AdyenParsedAdditionalResponse {
+    if (!additionalResponseStr) {
+      return { pspReference: '' };
+    }
+
+    // Try parsing as JSON first
+    if (additionalResponseStr.trim().startsWith('{')) {
+      try {
+        return JSON.parse(additionalResponseStr) as AdyenParsedAdditionalResponse;
+      } catch {
+        // Fallback to query-string format
+      }
+    }
+
+    // Parse standard Adyen key=value&key2=value2 format
+    const params = new URLSearchParams(additionalResponseStr);
+    return {
+      pspReference: params.get('pspReference') || '',
+      authCode: params.get('authCode') || undefined,
+      merchantReference: params.get('merchantReference') || undefined,
+      paymentMethod: params.get('paymentMethod') || undefined,
+      paymentMethodVariant: params.get('paymentMethodVariant') || undefined,
+      cardSummary: params.get('cardSummary') || undefined,
+      cardBin: params.get('cardBin') || undefined,
+      cardHolderName: params.get('cardHolderName') || undefined,
+      issuerCountry: params.get('issuerCountry') || undefined,
+      refusalReason: params.get('refusalReason') || undefined,
+      refusalReasonRaw: params.get('refusalReasonRaw') || undefined,
+      offline: params.get('offline') === 'true',
+      offlineSignature: params.get('offlineSignature') || undefined,
+      tenderReference: params.get('tenderReference') || undefined,
+      store: params.get('store') || undefined,
+      terminalId: params.get('terminalId') || undefined
+    };
+  }
+
+  // ============================================================================
+  // 1. STATE RECOVERY & IDEMPOTENCY RECONCILIATION LOOP
+  // ============================================================================
+
+  /**
+   * Scans local database for in-flight / interrupted transactions and fires
+   * standard Nexo TransactionStatusRequest to reconcile with Adyen Terminal API.
    */
   public async recoverUnresolvedTransactions(
     onReconciled?: (reconciled: PosTransactionRecord[]) => void
@@ -241,86 +351,75 @@ class AdyenTerminalService {
    * Simulates an asynchronous webhook payload arriving from Adyen acquiring network
    * 3-5 seconds after an async QR code (Alipay / WeChat Pay / PayByBank) scan.
    */
-  public triggerMockAsyncWebhook(params: {
+  public async triggerMockAsyncWebhook(params: {
     merchantReference: string;
-    pspReference: string;
+    pspReference?: string;
     amount: number;
     currency: string;
     paymentMethod: string;
     delayMs?: number;
     shouldSucceed?: boolean;
   }): Promise<AdyenNotificationRequestItem> {
-    const {
-      merchantReference,
-      pspReference,
-      amount,
-      currency,
-      paymentMethod,
-      delayMs = 3500,
-      shouldSucceed = true
-    } = params;
+    const delay = params.delayMs || 3500;
+    const isSuccess = params.shouldSucceed !== undefined ? params.shouldSucceed : true;
 
-    return new Promise((resolve) => {
-      setTimeout(async () => {
-        const notificationItem: AdyenNotificationRequestItem = {
-          additionalData: {
-            authCode: `ASYNC-${Math.floor(100000 + Math.random() * 900000)}`,
-            paymentMethod: paymentMethod.toLowerCase(),
-            cardSummary: 'QR-MOBILE-APP',
-            shopperReference: `cust_${merchantReference}`
-          },
-          amount: {
-            currency,
-            value: Math.round(amount * 100) // minor units
-          },
-          eventCode: 'AUTHORISATION',
-          eventDate: new Date().toISOString(),
-          merchantAccountCode: 'MetroCoffeePOS_Store_01',
-          merchantReference,
-          paymentMethod: paymentMethod.toLowerCase(),
-          pspReference,
-          success: shouldSucceed ? 'true' : 'false',
-          operations: ['CANCEL', 'REFUND']
-        };
+    // Simulate webhook dispatch network latency
+    await new Promise((resolve) => setTimeout(resolve, delay));
 
-        // Notify local subscribers
-        this.dispatchWebhookNotification(notificationItem);
+    const notificationItem: AdyenNotificationRequestItem = {
+      additionalData: {
+        shopperReference: `shopper-${Math.random().toString(36).substring(2, 8)}`,
+        authCode: isSuccess ? `AUTH-${Math.floor(100000 + Math.random() * 900000)}` : undefined,
+        paymentMethod: params.paymentMethod,
+        offline: 'false'
+      },
+      amount: {
+        currency: params.currency,
+        value: Math.round(params.amount * 100) // In minor units
+      },
+      eventCode: 'AUTHORISATION',
+      eventDate: new Date().toISOString(),
+      merchantAccountCode: 'MetroCoffeePOS_Store_01',
+      merchantReference: params.merchantReference,
+      paymentMethod: params.paymentMethod,
+      pspReference: params.pspReference || this.generatePspReference(),
+      success: isSuccess ? 'true' : 'false',
+      reason: isSuccess ? undefined : 'Refused by issuer / Insufficient funds'
+    };
 
-        // Update local Dexie record to SETTLED
-        try {
-          const matchingTxn = await posDb.transactions.get(merchantReference);
-          if (matchingTxn && matchingTxn.state !== 'SETTLED') {
-            const now = new Date().toISOString();
-            await posDb.transactions.put({
-              ...matchingTxn,
-              state: shouldSucceed ? 'SETTLED' : 'DECLINED',
-              authCode: notificationItem.additionalData.authCode,
-              syncedAt: now,
-              settledAt: shouldSucceed ? now : undefined
-            });
-          }
-        } catch (dbErr) {
-          console.error('[AdyenWebhook] Failed to auto-settle Dexie transaction:', dbErr);
-        }
+    // Broadcast event to active listeners
+    this.broadcastWebhook(notificationItem);
 
-        resolve(notificationItem);
-      }, delayMs);
+    // Log Notification to Nexo Inspector
+    this.broadcastLog({
+      id: `webhook-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      category: 'Notification',
+      direction: 'NOTIFICATION',
+      serviceId: params.merchantReference,
+      payload: notificationItem,
+      status: isSuccess ? 'Success' : 'Refusal'
     });
+
+    return notificationItem;
   }
 
   // ============================================================================
-  // 3. SECURE PROXY & SIMULATOR DISPATCH ROUTER
+  // 3. CORE ADYEN TERMINAL API DISPATCH BRIDGE
   // ============================================================================
 
   /**
-   * Main Dispatcher for all Nexo SaleToPOIRequest envelopes.
-   * Routes through Cloud Proxy, Local IP, or High-Fidelity Simulator.
+   * Main Dispatcher for all SaleToPOI Requests.
+   * Directs traffic based on configured connectionMode:
+   * - CLOUD_PROXY: Routes through secure backend adyenCloudProxy
+   * - LOCAL_IP: Direct local LAN websocket / HTTP connection
+   * - SIMULATOR: High-fidelity realistic Nexo response simulator
    */
   public async sendSaleToPOIRequest(request: SaleToPOIRequest): Promise<SaleToPOIResponse> {
     const startTime = performance.now();
     const header = request.SaleToPOIRequest.MessageHeader;
 
-    // Log Request to Nexo Inspector
+    // Log Outgoing Request to Nexo Inspector
     this.broadcastLog({
       id: `req-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: new Date().toISOString(),
@@ -333,13 +432,18 @@ class AdyenTerminalService {
     const config = useAdyenConfigStore.getState();
     let response: SaleToPOIResponse;
 
+    const controller = new AbortController();
+    const timeoutMs = 65000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       if (config.connectionMode === 'CLOUD_PROXY') {
         // Route through secure backend proxy HTTP endpoint (no client-side API keys exposed)
         const res = await fetch(config.proxyEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(request)
+          body: JSON.stringify(request),
+          signal: controller.signal
         });
         if (!res.ok) {
           const errorText = await res.text();
@@ -347,8 +451,13 @@ class AdyenTerminalService {
         }
         response = (await res.json()) as SaleToPOIResponse;
       } else if (config.connectionMode === 'LOCAL_IP') {
-        // Direct Local IP / WebSocket terminal connection
-        response = await this.dispatchDirectLocalTerminal(request, config.localTerminalIp, config.localTerminalPort);
+        // Direct Local IP / WebSocket terminal connection with AbortController timeout
+        response = await this.dispatchDirectLocalTerminal(
+          request,
+          config.localTerminalIp,
+          config.localTerminalPort,
+          controller.signal
+        );
       } else {
         // High-Fidelity Terminal Simulator
         response = await this.simulateAdyenTerminalNexoResponse(request);
@@ -361,6 +470,8 @@ class AdyenTerminalService {
         console.error(`[AdyenTerminalService] ${config.connectionMode} dispatch failed:`, err);
         throw err;
       }
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     const latencyMs = Math.round(performance.now() - startTime);
@@ -388,13 +499,15 @@ class AdyenTerminalService {
   private async dispatchDirectLocalTerminal(
     request: SaleToPOIRequest,
     ip: string,
-    port: number
+    port: number,
+    signal?: AbortSignal
   ): Promise<SaleToPOIResponse> {
     const url = `https://${ip}:${port}/nexo`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request)
+      body: JSON.stringify(request),
+      signal
     });
     if (!res.ok) {
       throw new Error(`Local Terminal responded with HTTP ${res.status}`);
@@ -438,16 +551,16 @@ class AdyenTerminalService {
         merchantReference: payReq.SaleData.SaleTransactionID.TransactionID,
         paymentMethod: cardBrand,
         cardSummary: cardLast4,
-        cardBin: '411189',
-        issuerCountry: currency === 'INR' ? 'IN' : currency === 'EUR' ? 'NL' : 'US',
-        shopperReference: `shopper_${payReq.SaleData.SaleTransactionID.TransactionID}`,
-        tenderReference: `tender_${pspReference.slice(-6)}`,
-        store: 'MetroCoffee_MainStore',
+        cardBin: '411111',
+        cardHolderName: 'VALUED SHOPPER',
+        issuerCountry: 'NL',
+        offline: false,
+        store: 'MetroCoffee_Store_01',
         terminalId: header.POIID
       };
 
-      const additionalResponseRaw = Object.entries(additionalResponseData)
-        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+      const additionalResponseStr = Object.entries(additionalResponseData)
+        .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
         .join('&');
 
       return {
@@ -459,31 +572,22 @@ class AdyenTerminalService {
           PaymentResponse: {
             Response: {
               Result: 'Success',
-              AdditionalResponse: additionalResponseRaw
+              AdditionalResponse: additionalResponseStr
             },
-            SaleData: payReq.SaleData,
+            SaleData: {
+              SaleTransactionID: payReq.SaleData.SaleTransactionID
+            },
             POIData: {
-              POIReconciliationID: `REC-${Date.now().toString().slice(-6)}`,
               POITransactionID: {
                 TransactionID: pspReference,
                 TimeStamp: now
-              }
+              },
+              POIReconciliationID: `REC-${Date.now()}`
             },
             PaymentResult: {
               PaymentType: 'Normal',
               PaymentInstrumentData: {
-                PaymentInstrumentType: 'Card',
-                CardData: {
-                  PaymentBrand: cardBrand,
-                  MaskedPan: `•••• •••• •••• ${cardLast4}`,
-                  CardBin: '411189',
-                  IssuerCountry: additionalResponseData.issuerCountry,
-                  EntryMode: ['Contactless', 'ICC'],
-                  PaymentToken: {
-                    TokenValue: `ShopperToken_${pspReference}`,
-                    ExpiryDateTime: '2029-12-31T23:59:59Z'
-                  }
-                }
+                PaymentInstrumentType: 'Card'
               },
               AmountsResp: {
                 Currency: currency,
@@ -493,13 +597,8 @@ class AdyenTerminalService {
               PaymentAcquirerData: {
                 AcquirerPOIID: header.POIID,
                 ApprovalCode: approvalCode,
-                MerchantID: 'MetroCoffeePOS_Store_01',
-                AcquirerTransactionID: {
-                  TransactionID: pspReference,
-                  TimeStamp: now
-                }
-              },
-              OnlineFlag: true
+                MerchantID: 'MetroCoffeePOS_Store_01'
+              }
             }
           }
         }
@@ -518,16 +617,13 @@ class AdyenTerminalService {
           ReversalResponse: {
             Response: {
               Result: 'Success',
-              AdditionalResponse: `pspReference=${pspReference}&reversalReason=${revReq.ReversalReason}`
+              AdditionalResponse: `Reversal of ${revReq.OriginalPOITransaction.POITransactionID.TransactionID} confirmed.`
             },
             POIData: {
               POITransactionID: {
                 TransactionID: pspReference,
                 TimeStamp: now
               }
-            },
-            OriginalPOITransaction: {
-              POITransactionID: revReq.OriginalPOITransaction.POITransactionID
             },
             ReversedAmount: revReq.ReversedAmount
           }
@@ -588,11 +684,12 @@ class AdyenTerminalService {
               },
               PaymentResponse: {
                 Response: {
-                  Result: 'Success'
+                  Result: 'Success',
+                  AdditionalResponse: `pspReference=${pspReference}&authCode=AUTH-REC-99`
                 },
                 SaleData: {
                   SaleTransactionID: {
-                    TransactionID: `RECOVERED-${statusReq.MessageReference.ServiceID}`,
+                    TransactionID: statusReq.MessageReference?.ServiceID || 'TXN-RECOVERED',
                     TimeStamp: now
                   }
                 },
@@ -605,8 +702,8 @@ class AdyenTerminalService {
                 PaymentResult: {
                   PaymentType: 'Normal',
                   AmountsResp: {
-                    Currency: 'INR',
-                    AuthorizedAmount: 100.00
+                    Currency: 'EUR',
+                    AuthorizedAmount: 25.00
                   },
                   PaymentAcquirerData: {
                     AcquirerPOIID: header.POIID,
@@ -655,8 +752,30 @@ class AdyenTerminalService {
       };
     }
 
-    const singleLimit = safConfig.maxSingleTransactionAmount[currency] || 50.00;
-    const cumulativeLimit = safConfig.maxCumulativeOfflineAmount[currency] || 500.00;
+    // Validate currency against supported currencies
+    if (safConfig.supportedCurrencies && !safConfig.supportedCurrencies.includes(currency)) {
+      return {
+        allowed: false,
+        reason: `Currency '${currency}' is not supported for Adyen Store-and-Forward (SaF) offline transactions.`
+      };
+    }
+
+    // Use nullish check so an explicitly configured 0 limit is not treated as absent
+    const singleLimit = safConfig.maxSingleTransactionAmount?.[currency];
+    if (singleLimit === undefined || singleLimit === null) {
+      return {
+        allowed: false,
+        reason: `No single transaction SaF limit configured for currency '${currency}'.`
+      };
+    }
+
+    const cumulativeLimit = safConfig.maxCumulativeOfflineAmount?.[currency];
+    if (cumulativeLimit === undefined || cumulativeLimit === null) {
+      return {
+        allowed: false,
+        reason: `No cumulative SaF limit configured for currency '${currency}'.`
+      };
+    }
 
     if (amount > singleLimit) {
       return {
@@ -680,13 +799,47 @@ class AdyenTerminalService {
     }
 
     const authCode = `ADYEN-SAF-${Math.floor(1000 + Math.random() * 9000)}`;
-    const offlineSignature = `HMAC-${Math.random().toString(36).substring(2, 14).toUpperCase()}`;
+
+    // Compute cryptographic HMAC-SHA256 over canonical transaction fields
+    const canonicalPayload = `${safConfig.merchantAccount}|${safConfig.poiId}|${currency}|${amount.toFixed(2)}|${currentOfflineCount + 1}|${safConfig.configVersion || 'v1'}`;
+    const hmacHex = computeHmacSha256(canonicalPayload, 'ADYEN_SAF_HMAC_MASTER_KEY_2026');
+    const offlineSignature = `HMAC-SHA256:${hmacHex}`;
 
     return {
       allowed: true,
       authCode,
       offlineSignature
     };
+  }
+
+  // ============================================================================
+  // 6. EVENT BUS (Nexo Inspector & Webhooks)
+  // ============================================================================
+
+  public subscribeToNexoLogs(callback: (log: NexoLogEntry) => void): () => void {
+    this.logListeners.push(callback);
+    return () => {
+      this.logListeners = this.logListeners.filter((l) => l !== callback);
+    };
+  }
+
+  public subscribeToAdyenWebhooks(callback: (notification: AdyenNotificationRequestItem) => void): () => void {
+    this.webhookListeners.push(callback);
+    return () => {
+      this.webhookListeners = this.webhookListeners.filter((l) => l !== callback);
+    };
+  }
+
+  private broadcastLog(log: NexoLogEntry) {
+    for (const listener of this.logListeners) {
+      listener(log);
+    }
+  }
+
+  private broadcastWebhook(notification: AdyenNotificationRequestItem) {
+    for (const listener of this.webhookListeners) {
+      listener(notification);
+    }
   }
 }
 
