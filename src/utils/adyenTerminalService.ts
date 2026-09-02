@@ -175,24 +175,42 @@ class AdyenTerminalService {
             const isApproved = repeatedPayment?.Response?.Result === 'Success';
             const now = new Date().toISOString();
 
+            const pspReference = repeatedPayment?.POIData?.POITransactionID?.TransactionID || txn.pspReference || undefined;
+            const authCode = repeatedPayment?.PaymentResult?.PaymentAcquirerData?.ApprovalCode || undefined;
+
+            let finalState: PosTransactionRecord['state'];
+            let declineReason: string | undefined;
+
+            if (isApproved) {
+              if (pspReference && authCode) {
+                finalState = 'SETTLED';
+              } else {
+                finalState = 'REQUIRES_REVIEW';
+                declineReason = 'Recovery reconciliation missing required PSP reference or Authorization Code from Adyen.';
+              }
+            } else {
+              finalState = 'DECLINED';
+              declineReason = repeatedPayment?.Response?.ErrorCondition || 'Transaction declined on terminal';
+            }
+
             const updatedTxn: PosTransactionRecord = {
               ...txn,
-              state: isApproved ? 'SETTLED' : 'DECLINED',
-              pspReference: repeatedPayment?.POIData?.POITransactionID?.TransactionID || txn.pspReference || this.generatePspReference(),
-              authCode: repeatedPayment?.PaymentResult?.PaymentAcquirerData?.ApprovalCode || 'RECOVERED-01',
+              state: finalState,
+              pspReference,
+              authCode,
               syncedAt: now,
-              settledAt: isApproved ? now : undefined,
-              declineReason: !isApproved ? (repeatedPayment?.Response?.ErrorCondition || 'Transaction declined on terminal') : undefined,
+              settledAt: finalState === 'SETTLED' ? now : undefined,
+              declineReason,
               nexoResponse: JSON.stringify(response)
             };
 
             await posDb.transactions.put(updatedTxn);
             reconciledRecords.push(updatedTxn);
           } else {
-            // If terminal has no record, mark as VOIDED / REQUIRES_REVIEW
+            // If terminal has no record, mark as REQUIRES_REVIEW
             const updatedTxn: PosTransactionRecord = {
               ...txn,
-              state: 'VOIDED',
+              state: 'REQUIRES_REVIEW',
               declineReason: 'No terminal record found during recovery reconciliation.'
             };
             await posDb.transactions.put(updatedTxn);
